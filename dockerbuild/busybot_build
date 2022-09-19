@@ -1,0 +1,55 @@
+# 1. Building JAR
+FROM maven:3.8-openjdk-11 AS build
+
+ADD . /build
+WORKDIR /build
+RUN mvn install -B
+
+# 2. Copying JAR for runtime
+FROM openjdk:11-jre-slim
+
+ENV JAR_FILE=/busybot/busybot-1.0.0.jar
+COPY --from=build /build/target/*.jar /busybot/
+WORKDIR /busybot
+
+# RUN
+CMD exec java \
+##################################
+#        Server Behaviour        #
+##################################
+-XX:+UseG1GC \
+-Xms1g \
+-Xmx8g \
+-Dspring.profiles.active=release \
+#########################
+#        Logging        #
+#########################
+-Dlog.level=${LOG_LEVEL:-info} \
+-Dlog.path=/var/log/busybot \
+###############################
+#        Miscellaneous        #
+###############################
+-Dbusywhale.rest.url.base=${REST_URL_BASE} \
+-Dbusywhale.websocket.url=${WEBSOCKET_URL} \
+-Dbot.verify_ssl.enabled=${VERIFY_SSL:-true} \
+-Dbot.api.key=${API_KEY} \
+-Dbot.api.secret=${API_SECRET} \
+-Dbot.action.interval=${ACTION_INTERVAL:-10000} \
+-Dbot.action.create_rfq.chance=${CHANCE_CREATE_RFQ:-0.0} \
+-Dbot.action.modify_rfq.chance=${CHANCE_MODIFY_RFQ:-0.0} \
+-Dbot.action.create_offer.chance=${CHANCE_CREATE_OFFER:-0.0} \
+-Dbot.action.modify_offer.chance=${CHANCE_MODIFY_OFFER:-0.0} \
+-Dbot.action.answer_offer.chance=${CHANGE_ANSWER_OFFER:-0.0} \
+-Dbot.action.create_counter.chance=${CHANCE_CREATE_COUNTER:-0.0} \
+-Dbot.action.modify_counter.chance=${CHANCE_MODIFY_COUNTER:-0.0} \
+-Dbot.action.answer_counter.chance=${CHANGE_ANSWER_COUNTER:-0.0} \
+-Dbot.action.modify_rfq.update.chance=${CHANCE_MODIFY_RFQ_UPDATE:-0.5} \
+-Dbot.action.modify_offer.update.chance=${CHANCE_MODIFY_OFFER_UPDATE:-0.5} \
+-Dbot.action.modify_counter.update.chance=${CHANCE_MODIFY_COUNTER_UPDATE:-0.5} \
+-Dbot.action.answer_offer.accept.chance=${CHANCE_ANSWER_OFFER_ACCEPT:-0.5} \
+-Dbot.action.answer_counter.accept.chance=${CHANCE_ANSWER_COUNTER_ACCEPT:-0.5} \
+-Dasset.filter=${ASSET_FILTER:-} \
+##########################
+#        JAR File        #
+##########################
+-jar ${JAR_FILE}

@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Configuration status="info">
+    <Appenders>
+        <Console name="Console-Appender" target="SYSTEM_OUT">
+            <PatternLayout pattern="%d{HH:mm:ss.SSS} %-5p [%t] %c{1} - %m%n"/>
+        </Console>
+        <!--        <Console name="Console-Json-Appender" target="SYSTEM_OUT">-->
+        <!--            <JsonLogLayout/>-->
+        <!--        </Console>-->
+        <RollingRandomAccessFile
+                name="RAF-Appender"
+                fileName="${sys:log.path:-logs}/busybot.log"
+                filePattern="${sys:log.path:-logs}/busybot_%d{yyyyMMdd}.log.gz">
+            <PatternLayout pattern="%d{yyyy-MM-dd HH:mm:ss.SSS} %-5p [%t] %c{1} - %m%n"/>
+            <Policies>
+                <SizeBasedTriggeringPolicy size="100 MB"/>
+            </Policies>
+            <DefaultRolloverStrategy max="10">
+                <Delete basePath="${sys:log.path:-logs}">
+                    <IfFileName glob="busybot_*.log.gz"/>
+                    <IfLastModified age="7d"/>
+                </Delete>
+            </DefaultRolloverStrategy>
+        </RollingRandomAccessFile>
+    </Appenders>
+
+    <Loggers>
+        <AsyncRoot level="${sys:log.level:-info}">
+            <AppenderRef ref="Console-Appender"/>
+            <!--            <AppenderRef ref="Console-Json-Appender"/>-->
+            <AppenderRef ref="RAF-Appender"/>
+        </AsyncRoot>
+    </Loggers>
+</Configuration>
