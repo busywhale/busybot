@@ -3,10 +3,8 @@ package com.busywhale.busybot.component;
 import com.busywhale.busybot.model.*;
 import com.busywhale.busybot.websocket.WebSocketMessage;
 import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.ObjectReader;
 import com.google.common.base.Splitter;
 import org.apache.commons.collections4.CollectionUtils;
 import org.apache.commons.collections4.ListUtils;
@@ -45,7 +43,7 @@ import static com.busywhale.busybot.util.BotUtils.*;
 public class BotEngine extends StompSessionHandlerAdapter {
     private static final Logger logger = LogManager.getLogger(BotEngine.class);
     private static final int TIMEOUT = 5;
-    private static final String INDEX_SNAPSHOTS_DESTINATION = "/topic/public/indices";
+    private static final String INDEX_SNAPSHOTS_DESTINATION = "/topic/public/indexes";
     private static final String RFQ_ADS_DESTINATION = "/user/queue/rfq/ads";
     private static final String MY_RFQ_DESTINATION = "/user/queue/rfq/my";
     private static final String PIVOT_CURRENCY = "USD";
@@ -53,7 +51,7 @@ public class BotEngine extends StompSessionHandlerAdapter {
     private final ObjectMapper mapper = new ObjectMapper();
     private final List<Asset> assets = new ArrayList<>();
     private final Map<String, Asset> assetMap = new HashMap<>();
-    private final Map<String, Double> indices = new ConcurrentHashMap<>();
+    private final Map<String, Double> indexes = new ConcurrentHashMap<>();
     private final Map<String, RfqEntry> rfqMap = new ConcurrentHashMap<>();
     private final List<Triple<Supplier<CompletableFuture<Void>>, Double, String>> actions = new ArrayList<>();
 
@@ -113,6 +111,10 @@ public class BotEngine extends StompSessionHandlerAdapter {
 
     private boolean isShuttingDown = false;
     private boolean isConnected = false;
+    private boolean isRfqAdSnapshotReady = false;
+    private boolean isMyRfqSnapshotReady = false;
+    private final List<String> pendingRfqAdPayloads = new ArrayList<>();
+    private final List<String> pendingMyRfqPayloads = new ArrayList<>();
 
     @PostConstruct
     public void postConstruct() {
@@ -153,6 +155,25 @@ public class BotEngine extends StompSessionHandlerAdapter {
         session.subscribe(INDEX_SNAPSHOTS_DESTINATION, this);
         session.subscribe(RFQ_ADS_DESTINATION, this);
         session.subscribe(MY_RFQ_DESTINATION, this);
+
+        apiEngine.getMyRfqs()
+                .thenAccept(list -> {
+                    logger.info("Received {} own RFQs", list.size());
+                    list.forEach(this::handleMyRfq);
+                    while (!pendingMyRfqPayloads.isEmpty()) {
+                        handleMyRfqFeed(pendingMyRfqPayloads.remove(0));
+                    }
+                    isMyRfqSnapshotReady = true;
+                });
+        apiEngine.getRfqAds()
+                .thenAccept(list -> {
+                    logger.info("Received {} RFQ ads", list.size());
+                    list.forEach(this::handleRfqAd);
+                    while (!pendingRfqAdPayloads.isEmpty()) {
+                        handleRfqAdsFeed(pendingRfqAdPayloads.remove(0));
+                    }
+                    isRfqAdSnapshotReady = true;
+                });
     }
 
     @Override
@@ -180,10 +201,18 @@ public class BotEngine extends StompSessionHandlerAdapter {
                     handleIndexSnapshotFeed(message.getMessage());
                     break;
                 case RFQ_ADS_DESTINATION:
-                    handleRfqAdsFeed(message.getMessage());
+                    if (!isRfqAdSnapshotReady) {
+                        pendingRfqAdPayloads.add(message.getMessage());
+                    } else {
+                        handleRfqAdsFeed(message.getMessage());
+                    }
                     break;
                 case MY_RFQ_DESTINATION:
-                    handleMyRfqFeed(message.getMessage());
+                    if (!isMyRfqSnapshotReady) {
+                        pendingMyRfqPayloads.add(message.getMessage());
+                    } else {
+                        handleMyRfqFeed(message.getMessage());
+                    }
                     break;
             }
         } else if (message.getCommand() == StompCommand.ERROR) {
@@ -239,10 +268,10 @@ public class BotEngine extends StompSessionHandlerAdapter {
                                 list.forEach(a -> assetMap.put(a.getSymbol(), a));
                             }),
                     apiEngine.getIndexSnapshots()
-                            .thenAccept(indices::putAll)
+                            .thenAccept(indexes::putAll)
             ).get(TIMEOUT, TimeUnit.SECONDS);
 
-            logger.info("Read {} assets and snapshot for {} indices/rates", assets.size(), indices.size());
+            logger.info("Read {} assets and snapshot for {} indexes/rates", assets.size(), indexes.size());
         } catch (Exception e) {
             throw new IllegalStateException("Failed to fetch assets and index snapshot", e);
         }
@@ -256,9 +285,9 @@ public class BotEngine extends StompSessionHandlerAdapter {
             Splitter.on("\r\n").omitEmptyStrings().splitToList(content).forEach(data -> {
                 logger.info("Read fiat rate data: {}", data);
                 List<String> values = Splitter.on(',').omitEmptyStrings().splitToList(data);
-                indices.put(values.get(2), Double.valueOf(values.get(3)));
+                indexes.put(values.get(2), Double.valueOf(values.get(3)));
             });
-            indices.putIfAbsent(PIVOT_CURRENCY, 1.0);
+            indexes.putIfAbsent(PIVOT_CURRENCY, 1.0);
         } catch (Exception e) {
             logger.error("Failed to load fiat rates from external source", e);
         }
@@ -287,7 +316,7 @@ public class BotEngine extends StompSessionHandlerAdapter {
             JsonNode indexesNode = node.path("indexes").path("indexes");
             if (!indexesNode.isMissingNode()) {
                 indexesNode.fields()
-                        .forEachRemaining(e -> indices.put(e.getKey(), e.getValue().doubleValue()));
+                        .forEachRemaining(e -> indexes.put(e.getKey(), e.getValue().doubleValue()));
             }
         } catch (JsonProcessingException e) {
             logger.error("Failed to parse index snapshot data", e);
@@ -300,24 +329,12 @@ public class BotEngine extends StompSessionHandlerAdapter {
             JsonNode node = mapper.readTree(payload);
             String event = node.get("event").asText();
 
-            switch (event) {
-                case "EVENT_RFQ_ADS_SNAPSHOT":
-                    JsonNode rfqSnapshotNode = node.path("rfqs");
-                    if (!rfqSnapshotNode.isMissingNode()) {
-                        ObjectReader reader = mapper.readerFor(new TypeReference<List<RfqEntry>>() {
-                        });
-                        List<RfqEntry> rfqs = reader.readValue(rfqSnapshotNode);
-                        rfqs.forEach(this::handleRfqAd);
-                    }
-                    break;
-                case "EVENT_RFQ_ADS_UPDATE":
-                    JsonNode rfqNode = node.path("rfq");
-                    if (!rfqNode.isMissingNode()) {
-                        RfqEntry rfqEntry = mapper.treeToValue(rfqNode, RfqEntry.class);
-                        handleRfqAd(rfqEntry);
-                    }
-                    break;
-                default:
+            if ("EVENT_RFQ_ADS_UPDATE".equals(event)) {
+                JsonNode rfqNode = node.path("rfq");
+                if (!rfqNode.isMissingNode()) {
+                    RfqEntry rfqEntry = mapper.treeToValue(rfqNode, RfqEntry.class);
+                    handleRfqAd(rfqEntry);
+                }
             }
         } catch (IOException e) {
             logger.error("Failed to parse RFQ ads data", e);
@@ -329,22 +346,11 @@ public class BotEngine extends StompSessionHandlerAdapter {
 
         try {
             JsonNode node = mapper.readTree(payload);
-            String event = node.get("event").asText();
 
-            if ("EVENT_MY_RFQ_AND_OFFER_SNAPSHOT".equals(event)) {
-                JsonNode rfqSnapshotNode = node.path("rfqs");
-                if (!rfqSnapshotNode.isMissingNode()) {
-                    ObjectReader reader = mapper.readerFor(new TypeReference<List<RfqEntry>>() {
-                    });
-                    List<RfqEntry> rfqs = reader.readValue(rfqSnapshotNode);
-                    rfqs.forEach(this::handleMyRfq);
-                }
-            } else {
-                JsonNode rfqNode = node.path("rfq");
-                if (!rfqNode.isMissingNode()) {
-                    RfqEntry rfqEntry = mapper.treeToValue(rfqNode, RfqEntry.class);
-                    handleMyRfq(rfqEntry);
-                }
+            JsonNode rfqNode = node.path("rfq");
+            if (!rfqNode.isMissingNode()) {
+                RfqEntry rfqEntry = mapper.treeToValue(rfqNode, RfqEntry.class);
+                handleMyRfq(rfqEntry);
             }
         } catch (IOException e) {
             logger.error("Failed to parse own RFQ data", e);
@@ -744,7 +750,7 @@ public class BotEngine extends StompSessionHandlerAdapter {
 
     private double getRateToUSD(String asset) {
         return Optional.ofNullable(assetMap.get(asset)).map(a -> {
-            double rateToUSD = ObjectUtils.defaultIfNull(indices.get(a.getSymbol()), 0.0);
+            double rateToUSD = ObjectUtils.defaultIfNull(indexes.get(a.getSymbol()), 0.0);
             return a.isCrypto() || rateToUSD == 0.0 ?
                     rateToUSD :
                     (1 / rateToUSD);

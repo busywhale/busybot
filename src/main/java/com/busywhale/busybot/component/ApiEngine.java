@@ -1,6 +1,7 @@
 package com.busywhale.busybot.component;
 
 import com.busywhale.busybot.model.Asset;
+import com.busywhale.busybot.model.RfqEntry;
 import com.busywhale.busybot.model.Side;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -91,6 +92,62 @@ public class ApiEngine {
                                 map.put(symbol, last);
                             });
                     return map;
+                }
+        );
+    }
+
+    @Async
+    public CompletableFuture<List<RfqEntry>> getRfqAds() {
+        logger.info("Fetching RFQ ads...");
+        return sendRequest(
+                "GET",
+                "/api/v1/rfq-ads",
+                null,
+                true,
+                node -> {
+                    JsonNode rfqsNode = node.path("rfqs");
+                    if (rfqsNode.isMissingNode()) {
+                        return Collections.emptyList();
+                    }
+                    ArrayNode arrayNode = (ArrayNode) rfqsNode;
+                    return StreamSupport.stream(arrayNode.spliterator(), false)
+                            .map(dataNode -> {
+                                try {
+                                    return mapper.treeToValue(dataNode, RfqEntry.class);
+                                } catch (Exception ignored) {
+                                    return null;
+                                }
+                            })
+                            .filter(Objects::nonNull)
+                            .collect(Collectors.toList());
+                }
+        );
+    }
+
+    @Async
+    public CompletableFuture<List<RfqEntry>> getMyRfqs() {
+        logger.info("Fetching my own RFQs...");
+        return sendRequest(
+                "GET",
+                "/api/v1/rfqs",
+                null,
+                true,
+                node -> {
+                    JsonNode rfqsNode = node.path("rfqs");
+                    if (rfqsNode.isMissingNode()) {
+                        return Collections.emptyList();
+                    }
+                    ArrayNode arrayNode = (ArrayNode) rfqsNode;
+                    return StreamSupport.stream(arrayNode.spliterator(), false)
+                            .map(dataNode -> {
+                                try {
+                                    return mapper.treeToValue(dataNode, RfqEntry.class);
+                                } catch (Exception ignored) {
+                                    return null;
+                                }
+                            })
+                            .filter(Objects::nonNull)
+                            .collect(Collectors.toList());
                 }
         );
     }
