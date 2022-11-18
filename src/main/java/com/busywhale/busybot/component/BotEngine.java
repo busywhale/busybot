@@ -10,6 +10,7 @@ import org.apache.commons.collections4.CollectionUtils;
 import org.apache.commons.collections4.ListUtils;
 import org.apache.commons.io.IOUtils;
 import org.apache.commons.lang3.ObjectUtils;
+import org.apache.commons.lang3.StringUtils;
 import org.apache.commons.lang3.tuple.Pair;
 import org.apache.commons.lang3.tuple.Triple;
 import org.apache.logging.log4j.LogManager;
@@ -150,7 +151,7 @@ public class BotEngine extends StompSessionHandlerAdapter {
 
     @Override
     public void afterConnected(StompSession session, StompHeaders connectedHeaders) {
-        logger.info("New WebSocket session established: {}", session.getSessionId());
+        logger.info("New WebSocket session established: {}, headers={}", session.getSessionId(), connectedHeaders);
         isConnected = true;
         session.subscribe(INDEX_SNAPSHOTS_DESTINATION, this);
         session.subscribe(RFQ_ADS_DESTINATION, this);
@@ -178,7 +179,7 @@ public class BotEngine extends StompSessionHandlerAdapter {
 
     @Override
     public void handleTransportError(StompSession session, Throwable exception) {
-        logger.error("WebSocket transport error ({}): {}", session.getSessionId(), exception.getMessage());
+        logger.error("WebSocket transport error ({}): {}", session.getSessionId(), exception.getMessage(), exception);
         handleError();
     }
 
@@ -191,6 +192,13 @@ public class BotEngine extends StompSessionHandlerAdapter {
     public void handleFrame(StompHeaders headers, Object payload) {
         WebSocketMessage message = (WebSocketMessage) payload;
 
+        if (message == null) {
+            String s = headers.getFirst("message");
+            if (StringUtils.isNotEmpty(s)) {
+                logger.warn("Stomp message from server: " + s);
+            }
+            return;
+        }
         if (message.getCommand() == StompCommand.MESSAGE) {
             String destination = headers.getDestination();
             if (destination == null) {
