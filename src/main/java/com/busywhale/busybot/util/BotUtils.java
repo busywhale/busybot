@@ -36,7 +36,7 @@ public class BotUtils {
     }
 
     public static int getRandomTtl() {
-        return 60 * (random.nextInt(10) + 1);
+        return 300 + 60 * random.nextInt(10);
     }
 
     public static double getRandomPrice(double reference, Side side) {
