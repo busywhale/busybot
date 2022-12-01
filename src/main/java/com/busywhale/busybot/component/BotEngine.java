@@ -324,7 +324,7 @@ public class BotEngine extends StompSessionHandlerAdapter {
             JsonNode indexesNode = node.path("indexes").path("indexes");
             if (!indexesNode.isMissingNode()) {
                 indexesNode.fields()
-                        .forEachRemaining(e -> indexes.put(e.getKey(), e.getValue().doubleValue()));
+                        .forEachRemaining(e -> indexes.put(e.getKey(), e.getValue().path("L").doubleValue()));
             }
         } catch (JsonProcessingException e) {
             logger.error("Failed to parse index snapshot data", e);
