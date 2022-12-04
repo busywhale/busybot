@@ -5,8 +5,8 @@ import java.util.List;
 
 public class RfqEntry {
     private String id;
-    private String longAsset;
-    private String shortAsset;
+    private String baseAsset;
+    private String quoteAsset;
     private Side side;
     private BigDecimal qty;
     private Integer ttl;
@@ -25,20 +25,20 @@ public class RfqEntry {
         this.id = id;
     }
 
-    public String getLongAsset() {
-        return longAsset;
+    public String getBaseAsset() {
+        return baseAsset;
     }
 
-    public void setLongAsset(String longAsset) {
-        this.longAsset = longAsset;
+    public void setBaseAsset(String baseAsset) {
+        this.baseAsset = baseAsset;
     }
 
-    public String getShortAsset() {
-        return shortAsset;
+    public String getQuoteAsset() {
+        return quoteAsset;
     }
 
-    public void setShortAsset(String shortAsset) {
-        this.shortAsset = shortAsset;
+    public void setQuoteAsset(String quoteAsset) {
+        this.quoteAsset = quoteAsset;
     }
 
     public Side getSide() {

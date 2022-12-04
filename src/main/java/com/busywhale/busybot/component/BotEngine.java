@@ -395,8 +395,8 @@ public class BotEngine extends StompSessionHandlerAdapter {
     }
 
     private void mergeRfqDetails(RfqEntry rfqEntry, RfqEntry oldRfqEntry) {
-        Optional.ofNullable(rfqEntry.getLongAsset()).ifPresent(oldRfqEntry::setLongAsset);
-        Optional.ofNullable(rfqEntry.getShortAsset()).ifPresent(oldRfqEntry::setShortAsset);
+        Optional.ofNullable(rfqEntry.getBaseAsset()).ifPresent(oldRfqEntry::setBaseAsset);
+        Optional.ofNullable(rfqEntry.getQuoteAsset()).ifPresent(oldRfqEntry::setQuoteAsset);
         Optional.ofNullable(rfqEntry.getQty()).ifPresent(oldRfqEntry::setQty);
         Optional.ofNullable(rfqEntry.getSide()).ifPresent(oldRfqEntry::setSide);
         Optional.ofNullable(rfqEntry.getStatus()).ifPresent(oldRfqEntry::setStatus);
@@ -459,15 +459,15 @@ public class BotEngine extends StompSessionHandlerAdapter {
     }
 
     private CompletableFuture<Void> createRfq() {
-        String longAsset = getRandomAsset(assets, true, null).getSymbol();
-        String shortAsset = getRandomAsset(assets, false, longAsset).getSymbol();
+        String baseAsset = getRandomAsset(assets, true, null).getSymbol();
+        String quoteAsset = getRandomAsset(assets, false, baseAsset).getSymbol();
         Side side = getRandomSide(true);
         int ttl = getRandomTtl();
         double qty = getRandomQty(null);
 
         return apiEngine.createRfq(
-                longAsset,
-                shortAsset,
+                baseAsset,
+                quoteAsset,
                 side,
                 ttl,
                 qty
@@ -513,9 +513,9 @@ public class BotEngine extends StompSessionHandlerAdapter {
             logger.info("No eligible RFQ for creating offer");
             return CompletableFuture.completedFuture(null);
         }
-        double reference = getReferencePrice(targetRfq.getLongAsset(), targetRfq.getShortAsset());
+        double reference = getReferencePrice(targetRfq.getBaseAsset(), targetRfq.getQuoteAsset());
         if (reference == 0.0) {
-            logger.warn("No reference price for creating offer: longAsset={}, shortAsset={}", targetRfq.getLongAsset(), targetRfq.getShortAsset());
+            logger.warn("No reference price for creating offer: baseAsset={}, quoteAsset={}", targetRfq.getBaseAsset(), targetRfq.getQuoteAsset());
             return CompletableFuture.completedFuture(null);
         }
         Side offerSide;
@@ -549,9 +549,9 @@ public class BotEngine extends StompSessionHandlerAdapter {
         RfqEntry targetRfq = pair.getLeft();
         OfferEntry targetOffer = pair.getRight();
         if (toss(tossModifyOfferUpdate)) {
-            double reference = getReferencePrice(targetRfq.getLongAsset(), targetRfq.getShortAsset());
+            double reference = getReferencePrice(targetRfq.getBaseAsset(), targetRfq.getQuoteAsset());
             if (reference == 0.0) {
-                logger.warn("No reference price for updating offer: longAsset={}, shortAsset={}", targetRfq.getLongAsset(), targetRfq.getShortAsset());
+                logger.warn("No reference price for updating offer: baseAsset={}, quoteAsset={}", targetRfq.getBaseAsset(), targetRfq.getQuoteAsset());
                 return CompletableFuture.completedFuture(null);
             }
             Side offerSide;
@@ -660,9 +660,9 @@ public class BotEngine extends StompSessionHandlerAdapter {
             logger.info("No eligible offer for creating counter-offer");
             return CompletableFuture.completedFuture(null);
         }
-        double reference = getReferencePrice(targetRfq.getLongAsset(), targetRfq.getShortAsset());
+        double reference = getReferencePrice(targetRfq.getBaseAsset(), targetRfq.getQuoteAsset());
         if (reference == 0.0) {
-            logger.warn("No reference price for sending counter-offer: longAsset={}, shortAsset={}", targetRfq.getLongAsset(), targetRfq.getShortAsset());
+            logger.warn("No reference price for sending counter-offer: baseAsset={}, quoteAsset={}", targetRfq.getBaseAsset(), targetRfq.getQuoteAsset());
             return CompletableFuture.completedFuture(null);
         }
         return apiEngine.createCounter(
@@ -685,9 +685,9 @@ public class BotEngine extends StompSessionHandlerAdapter {
         RfqEntry targetRfq = pair.getLeft();
         OfferEntry targetOffer = pair.getRight();
         if (toss(tossModifyCounterUpdate)) {
-            double reference = getReferencePrice(targetRfq.getLongAsset(), targetRfq.getShortAsset());
+            double reference = getReferencePrice(targetRfq.getBaseAsset(), targetRfq.getQuoteAsset());
             if (reference == 0.0) {
-                logger.warn("No reference price for sending counter-offer: longAsset={}, shortAsset={}", targetRfq.getLongAsset(), targetRfq.getShortAsset());
+                logger.warn("No reference price for sending counter-offer: baseAsset={}, quoteAsset={}", targetRfq.getBaseAsset(), targetRfq.getQuoteAsset());
                 return CompletableFuture.completedFuture(null);
             }
             return apiEngine.updateCounter(
@@ -750,10 +750,10 @@ public class BotEngine extends StompSessionHandlerAdapter {
         }
     }
 
-    private double getReferencePrice(String longAsset, String shortAsset) {
-        double longAssetPrice = getRateToUSD(longAsset);
-        double shortAssetPrice = getRateToUSD(shortAsset);
-        return shortAssetPrice != 0.0 ? longAssetPrice / shortAssetPrice : 0.0;
+    private double getReferencePrice(String baseAsset, String quoteAsset) {
+        double baseAssetPrice = getRateToUSD(baseAsset);
+        double quoteAssetPrice = getRateToUSD(quoteAsset);
+        return quoteAssetPrice != 0.0 ? baseAssetPrice / quoteAssetPrice : 0.0;
     }
 
     private double getRateToUSD(String asset) {

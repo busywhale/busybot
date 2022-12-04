@@ -153,11 +153,11 @@ public class ApiEngine {
     }
 
     @Async
-    public CompletableFuture<Void> createRfq(String longAsset, String shortAsset, Side side, int ttl, double qty) {
-        logger.info("Creating RFQ: longAsset={}, shortAsset={}, side={}, ttl={}, qty={}", longAsset, shortAsset, side, ttl, qty);
+    public CompletableFuture<Void> createRfq(String baseAsset, String quoteAsset, Side side, int ttl, double qty) {
+        logger.info("Creating RFQ: baseAsset={}, quoteAsset={}, side={}, ttl={}, qty={}", baseAsset, quoteAsset, side, ttl, qty);
         String payload = mapper.createObjectNode()
-                .put("longAsset", longAsset)
-                .put("shortAsset", shortAsset)
+                .put("baseAsset", baseAsset)
+                .put("quoteAsset", quoteAsset)
                 .put("side", side.toString())
                 .put("ttl", ttl)
                 .put("qty", qty)
