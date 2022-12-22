@@ -83,14 +83,12 @@ public class ApiEngine {
                 null,
                 false,
                 node -> {
-                    ArrayNode arrayNode = (ArrayNode) node;
                     Map<String, Double> map = new HashMap<>();
-                    StreamSupport.stream(arrayNode.spliterator(), false)
-                            .forEach(dataNode -> {
-                                String symbol = dataNode.path("ix").asText();
-                                double last = dataNode.path("last").doubleValue();
-                                map.put(symbol, last);
-                            });
+                    JsonNode indexesNode = node.path("indexes");
+                    if (!indexesNode.isMissingNode()) {
+                        indexesNode.fields()
+                                .forEachRemaining(e -> map.put(e.getKey(), e.getValue().path("L").doubleValue()));
+                    }
                     return map;
                 }
         );
