@@ -197,14 +197,14 @@ public class ApiEngine {
     }
 
     @Async
-    public CompletableFuture<Void> createOffer(String rfqId, int offerTtl, Double offerBidPx, Double offerBidQty, Double offerAskPx, Double offerAskQty) {
-        logger.info("Creating offer: rfqId={}, ttl={}, bidPx={}, bidQty={}, askPx={}, askQty={}", rfqId, offerTtl, offerBidPx, offerBidQty, offerAskPx, offerAskQty);
+    public CompletableFuture<Void> createOffer(String rfqId, int ttl, Double bidPx, Double bidQty, Double askPx, Double askQty) {
+        logger.info("Creating offer: rfqId={}, ttl={}, bidPx={}, bidQty={}, askPx={}, askQty={}", rfqId, ttl, bidPx, bidQty, askPx, askQty);
         ObjectNode reqNode = mapper.createObjectNode()
-                .put("offerTtl", offerTtl);
-        Optional.ofNullable(offerBidPx).ifPresent(d -> reqNode.put("offerBidPx", d));
-        Optional.ofNullable(offerBidQty).ifPresent(d -> reqNode.put("offerBidQty", d));
-        Optional.ofNullable(offerAskPx).ifPresent(d -> reqNode.put("offerAskPx", d));
-        Optional.ofNullable(offerAskQty).ifPresent(d -> reqNode.put("offerAskQty", d));
+                .put("ttl", ttl);
+        Optional.ofNullable(bidPx).ifPresent(d -> reqNode.put("bidPx", d));
+        Optional.ofNullable(bidQty).ifPresent(d -> reqNode.put("bidQty", d));
+        Optional.ofNullable(askPx).ifPresent(d -> reqNode.put("askPx", d));
+        Optional.ofNullable(askQty).ifPresent(d -> reqNode.put("askQty", d));
         return sendRequest(
                 "POST",
                 "/api/v1/rfqs/" + rfqId + "/offers",
@@ -215,14 +215,14 @@ public class ApiEngine {
     }
 
     @Async
-    public CompletableFuture<Void> updateOffer(String rfqId, String offerId, int offerNonce, int offerTtl, Double offerBidPx, Double offerBidQty, Double offerAskPx, Double offerAskQty) {
-        logger.info("Updating offer: rfqId={}, offerId={}, offerNonce={}, ttl={}, bidPx={}, bidQty={}, askPx={}, askQty={}", rfqId, offerId, offerNonce, offerTtl, offerBidPx, offerBidQty, offerAskPx, offerAskQty);
+    public CompletableFuture<Void> updateOffer(String rfqId, String offerId, int offerNonce, int ttl, Double bidPx, Double bidQty, Double askPx, Double askQty) {
+        logger.info("Updating offer: rfqId={}, offerId={}, offerNonce={}, ttl={}, bidPx={}, bidQty={}, askPx={}, askQty={}", rfqId, offerId, offerNonce, ttl, bidPx, bidQty, askPx, askQty);
         ObjectNode reqNode = mapper.createObjectNode()
-                .put("offerTtl", offerTtl);
-        Optional.ofNullable(offerBidPx).ifPresent(d -> reqNode.put("offerBidPx", d));
-        Optional.ofNullable(offerBidQty).ifPresent(d -> reqNode.put("offerBidQty", d));
-        Optional.ofNullable(offerAskPx).ifPresent(d -> reqNode.put("offerAskPx", d));
-        Optional.ofNullable(offerAskQty).ifPresent(d -> reqNode.put("offerAskQty", d));
+                .put("ttl", ttl);
+        Optional.ofNullable(bidPx).ifPresent(d -> reqNode.put("bidPx", d));
+        Optional.ofNullable(bidQty).ifPresent(d -> reqNode.put("bidQty", d));
+        Optional.ofNullable(askPx).ifPresent(d -> reqNode.put("askPx", d));
+        Optional.ofNullable(askQty).ifPresent(d -> reqNode.put("askQty", d));
         return sendRequest(
                 "PATCH",
                 "/api/v1/rfqs/" + rfqId + "/offers/" + offerId + "/offer/" + offerNonce,
@@ -273,14 +273,14 @@ public class ApiEngine {
     }
 
     @Async
-    public CompletableFuture<Void> createCounter(String rfqId, String offerId, int counterTtl, Double counterBidPx, Double counterBidQty, Double counterAskPx, Double counterAskQty) {
-        logger.info("Creating counter-offer: rfqId={}, offerId={}, ttl={}, bidPx={}, bidQty={}, askPx={}, askQty={}", rfqId, offerId, counterTtl, counterBidPx, counterBidQty, counterAskPx, counterAskQty);
+    public CompletableFuture<Void> createCounter(String rfqId, String offerId, int ttl, Double bidPx, Double bidQty, Double askPx, Double askQty) {
+        logger.info("Creating counter-offer: rfqId={}, offerId={}, ttl={}, bidPx={}, bidQty={}, askPx={}, askQty={}", rfqId, offerId, ttl, bidPx, bidQty, askPx, askQty);
         ObjectNode reqNode = mapper.createObjectNode()
-                .put("counterTtl", counterTtl);
-        Optional.ofNullable(counterBidPx).ifPresent(d -> reqNode.put("counterBidPx", d));
-        Optional.ofNullable(counterBidQty).ifPresent(d -> reqNode.put("counterBidQty", d));
-        Optional.ofNullable(counterAskPx).ifPresent(d -> reqNode.put("counterAskPx", d));
-        Optional.ofNullable(counterAskQty).ifPresent(d -> reqNode.put("counterAskQty", d));
+                .put("ttl", ttl);
+        Optional.ofNullable(bidPx).ifPresent(d -> reqNode.put("bidPx", d));
+        Optional.ofNullable(bidQty).ifPresent(d -> reqNode.put("bidQty", d));
+        Optional.ofNullable(askPx).ifPresent(d -> reqNode.put("askPx", d));
+        Optional.ofNullable(askQty).ifPresent(d -> reqNode.put("askQty", d));
         return sendRequest(
                 "POST",
                 "/api/v1/rfqs/" + rfqId + "/offers/" + offerId + "/counter-offer",
@@ -291,14 +291,14 @@ public class ApiEngine {
     }
 
     @Async
-    public CompletableFuture<Void> updateCounter(String rfqId, String offerId, int counterNonce, int counterTtl, Double counterBidPx, Double counterBidQty, Double counterAskPx, Double counterAskQty) {
-        logger.info("Updating counter-offer: rfqId={}, offerId={}, counterNonce={}, ttl={}, bidPx={}, bidQty={}, askPx={}, askQty={}", rfqId, offerId, counterNonce, counterTtl, counterBidPx, counterBidQty, counterAskPx, counterAskQty);
+    public CompletableFuture<Void> updateCounter(String rfqId, String offerId, int counterNonce, int ttl, Double bidPx, Double bidQty, Double askPx, Double askQty) {
+        logger.info("Updating counter-offer: rfqId={}, offerId={}, counterNonce={}, ttl={}, bidPx={}, bidQty={}, askPx={}, askQty={}", rfqId, offerId, counterNonce, ttl, bidPx, bidQty, askPx, askQty);
         ObjectNode reqNode = mapper.createObjectNode()
-                .put("counterTtl", counterTtl);
-        Optional.ofNullable(counterBidPx).ifPresent(d -> reqNode.put("counterBidPx", d));
-        Optional.ofNullable(counterBidQty).ifPresent(d -> reqNode.put("counterBidQty", d));
-        Optional.ofNullable(counterAskPx).ifPresent(d -> reqNode.put("counterAskPx", d));
-        Optional.ofNullable(counterAskQty).ifPresent(d -> reqNode.put("counterAskQty", d));
+                .put("ttl", ttl);
+        Optional.ofNullable(bidPx).ifPresent(d -> reqNode.put("bidPx", d));
+        Optional.ofNullable(bidQty).ifPresent(d -> reqNode.put("bidQty", d));
+        Optional.ofNullable(askPx).ifPresent(d -> reqNode.put("askPx", d));
+        Optional.ofNullable(askQty).ifPresent(d -> reqNode.put("askQty", d));
         return sendRequest(
                 "PATCH",
                 "/api/v1/rfqs/" + rfqId + "/offers/" + offerId + "/counter-offer/" + counterNonce,
