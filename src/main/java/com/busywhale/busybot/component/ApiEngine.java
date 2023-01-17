@@ -1,8 +1,7 @@
 package com.busywhale.busybot.component;
 
-import com.busywhale.busybot.model.Asset;
-import com.busywhale.busybot.model.RfqEntry;
-import com.busywhale.busybot.model.Side;
+import com.busywhale.busybot.model.*;
+import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
@@ -37,10 +36,10 @@ import java.util.stream.StreamSupport;
 public class ApiEngine {
     private static final Logger logger = LogManager.getLogger(ApiEngine.class);
 
-    @Value("${busywhale.rest.url.base}")
+    @Value("${REST_URL_BASE}")
     private String apiUrlBase;
 
-    @Value("${asset.filter:}")
+    @Value("${ASSET_FILTER:}")
     private String assetFilter;
 
     @Autowired
@@ -49,7 +48,8 @@ public class ApiEngine {
     @Autowired
     private ApiKeySigner signer;
 
-    private final ObjectMapper mapper = new ObjectMapper();
+    private final ObjectMapper mapper = new ObjectMapper()
+            .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
 
     @Async
     public CompletableFuture<List<Asset>> getAssets() {
@@ -70,7 +70,7 @@ public class ApiEngine {
                                         ListUtils.emptyIfNull(fiats.join())
                                 )
                                 .stream()
-                                .filter(asset -> assetSet.isEmpty() || assetSet.contains(asset.getSymbol()))
+                                .filter(asset -> assetSet.isEmpty() || assetSet.contains(asset.symbol()))
                                 .collect(Collectors.toList())
                 );
     }
@@ -117,7 +117,7 @@ public class ApiEngine {
                                 }
                             })
                             .filter(Objects::nonNull)
-                            .collect(Collectors.toList());
+                            .toList();
                 }
         );
     }
@@ -145,7 +145,117 @@ public class ApiEngine {
                                 }
                             })
                             .filter(Objects::nonNull)
-                            .collect(Collectors.toList());
+                            .toList();
+                }
+        );
+    }
+
+    @Async
+    public CompletableFuture<List<PositionEntry>> getPositions() {
+        logger.info("Fetching positions...");
+        return sendRequest(
+                "GET",
+                "/api/v1/position",
+                null,
+                true,
+                node -> {
+                    JsonNode positionsNode = node.path("positions");
+                    if (positionsNode.isMissingNode()) {
+                        return Collections.emptyList();
+                    }
+                    ArrayNode arrayNode = (ArrayNode) positionsNode;
+                    return StreamSupport.stream(arrayNode.spliterator(), false)
+                            .map(dataNode -> {
+                                try {
+                                    return mapper.treeToValue(dataNode, PositionEntry.class);
+                                } catch (Exception ignored) {
+                                    return null;
+                                }
+                            })
+                            .filter(Objects::nonNull)
+                            .toList();
+                }
+        );
+    }
+
+    @Async
+    public CompletableFuture<List<SettlementEntry>> getSettlements() {
+        logger.info("Fetching settlements...");
+        return sendRequest(
+                "GET",
+                "/api/v1/settlement",
+                null,
+                true,
+                node -> {
+                    JsonNode settlementsNode = node.path("settlements");
+                    if (settlementsNode.isMissingNode()) {
+                        return Collections.emptyList();
+                    }
+                    ArrayNode arrayNode = (ArrayNode) settlementsNode;
+                    return StreamSupport.stream(arrayNode.spliterator(), false)
+                            .map(dataNode -> {
+                                try {
+                                    return mapper.treeToValue(dataNode, SettlementEntry.class);
+                                } catch (Exception ignored) {
+                                    return null;
+                                }
+                            })
+                            .filter(Objects::nonNull)
+                            .toList();
+                }
+        );
+    }
+
+    @Async
+    public void acceptSettlement(String settlementId) {
+        logger.info("Accepting settlement {}...", settlementId);
+        sendRequest(
+                "POST",
+                "/api/v1/settlement/" + settlementId + "/accept",
+                null,
+                true,
+                node -> {
+                    JsonNode statusNode = node.path("status");
+                    if (!statusNode.isMissingNode()) {
+                        logger.info("Completed accepting settlement {}, new status={}", settlementId, statusNode.textValue());
+                    }
+                    return null;
+                }
+        );
+    }
+
+    @Async
+    public void rejectSettlement(String settlementId) {
+        logger.info("Rejecting settlement {}...", settlementId);
+        sendRequest(
+                "POST",
+                "/api/v1/settlement/" + settlementId + "/reject",
+                null,
+                true,
+                node -> {
+                    JsonNode statusNode = node.path("status");
+                    if (!statusNode.isMissingNode()) {
+                        logger.info("Completed rejecting settlement {}, new status={}", settlementId, statusNode.textValue());
+                    }
+                    return null;
+                }
+        );
+    }
+
+    @Async
+    public void performSettlement(String settlementId) {
+        logger.info("Performing settlement {}...", settlementId);
+        sendRequest(
+                "POST",
+                "/api/v1/settlement/" + settlementId + "/settle",
+                null,
+                true,
+                node -> {
+                    JsonNode statusNode = node.path("status");
+                    if (!statusNode.isMissingNode()) {
+                        logger.info("Completed performing settlement {}, new status={}", settlementId, statusNode.textValue());
+                    }
+                    return null;
                 }
         );
     }
@@ -159,6 +269,7 @@ public class ApiEngine {
                 .put("side", side.toString())
                 .put("ttl", ttl)
                 .put("qty", qty)
+                .put("settlementMethod", "OFF_CHAIN_IMMEDIATE")
                 .toString();
         return sendRequest(
                 "POST",
@@ -361,7 +472,12 @@ public class ApiEngine {
                     }
                     List<Asset> list = new ArrayList<>();
                     cryptoListNode.fieldNames()
-                            .forEachRemaining(name -> list.add(new Asset(name, true)));
+                            .forEachRemaining(name -> {
+                                JsonNode isTradableNode = cryptoListNode.path(name).path("isTradable");
+                                if (!isTradableNode.isMissingNode() && isTradableNode.asBoolean()) {
+                                    list.add(new Asset(name, true));
+                                }
+                            });
                     return list;
                 }
         );

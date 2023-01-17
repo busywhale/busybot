@@ -1,4 +1,5 @@
-/dockerbuild
+/docker
 /logs
 /config
 /target
+/run

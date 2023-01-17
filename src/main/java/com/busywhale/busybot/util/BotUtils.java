@@ -3,6 +3,7 @@ package com.busywhale.busybot.util;
 import com.busywhale.busybot.model.Asset;
 import com.busywhale.busybot.model.Side;
 import org.apache.commons.collections4.ListUtils;
+import org.springframework.lang.NonNull;
 import org.springframework.util.CollectionUtils;
 
 import java.util.List;
@@ -13,6 +14,8 @@ import java.util.stream.Collectors;
 
 public class BotUtils {
     private static final Random random = new Random(System.nanoTime());
+    public static final int MIN_RFQ_TTL = 300;
+    public static final int MIN_OFFER_TTL = 60;
 
     public static <K, T> Map<K, T> convertToMap(List<T> offers, Function<T, K> keyFunc) {
         return ListUtils.emptyIfNull(offers)
@@ -24,7 +27,7 @@ public class BotUtils {
         Asset asset = null;
         while (asset == null ||
                 (cryptoOnly && !asset.isCrypto()) ||
-                (skipSymbol != null && skipSymbol.equals(asset.getSymbol()))
+                (skipSymbol != null && skipSymbol.equals(asset.symbol()))
         ) {
             asset = assets.get(random.nextInt(assets.size()));
         }
@@ -35,18 +38,19 @@ public class BotUtils {
         return Side.values()[random.nextInt(includeBoth ? 3 : 2)];
     }
 
-    public static int getRandomTtl() {
-        return 300 + 60 * random.nextInt(10);
+    public static int getSuggestedTtl(boolean isOffer, boolean useMin) {
+        return (isOffer ? MIN_OFFER_TTL : MIN_RFQ_TTL) + (useMin ? 0 : (60 * random.nextInt(10)));
     }
 
-    public static double getRandomPrice(double reference, Side side) {
-        double maxRange = reference * 0.1;
-        double delta = random.nextDouble() * maxRange * (side == Side.BUY ? -1 : 1);
+    public static double getRandomPrice(double reference, double width, Side side) {
+        double maxRange = reference * width;
+        double delta = getRandom(0.05, 1.0) * maxRange * (side == Side.BUY ? -1 : 1);
         return Math.max(1 / Math.pow(10d, 2d), roundToNearest(reference + delta, 2));
     }
 
     public static double getRandomQty(Double bound) {
-        return Math.max(1, roundToNearest(random.nextDouble() * (bound != null ? bound : 100.0), 2));
+        double effectiveBound = bound != null ? bound : 10.0;
+        return Math.min(effectiveBound, Math.max(0.001, roundToNearest(getRandom(0.1, 1.0) * effectiveBound, 2)));
     }
 
     public static <T> T getRandomFromList(List<T> list) {
@@ -63,5 +67,12 @@ public class BotUtils {
 
     public static boolean toss(double target) {
         return target > random.nextDouble();
+    }
+
+    private static double getRandom(double min, double max) {
+        if (max <= min) {
+            return random.nextDouble();
+        }
+        return random.nextDouble() * (max - min) + min;
     }
 }

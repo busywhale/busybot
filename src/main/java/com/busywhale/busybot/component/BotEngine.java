@@ -3,9 +3,13 @@ package com.busywhale.busybot.component;
 import com.busywhale.busybot.model.*;
 import com.busywhale.busybot.websocket.WebSocketMessage;
 import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.google.common.base.Splitter;
+import jakarta.annotation.PostConstruct;
+import jakarta.annotation.PreDestroy;
 import org.apache.commons.collections4.CollectionUtils;
 import org.apache.commons.collections4.ListUtils;
 import org.apache.commons.io.IOUtils;
@@ -26,17 +30,17 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.socket.WebSocketHttpHeaders;
 import org.springframework.web.socket.messaging.WebSocketStompClient;
 
-import javax.annotation.PostConstruct;
-import javax.annotation.PreDestroy;
 import java.io.IOException;
 import java.lang.reflect.Type;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
+import java.time.Instant;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.function.Predicate;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
+import java.util.stream.StreamSupport;
 
 import static com.busywhale.busybot.util.BotUtils.*;
 
@@ -47,13 +51,17 @@ public class BotEngine extends StompSessionHandlerAdapter {
     private static final String INDEX_SNAPSHOTS_DESTINATION = "/topic/public/indexes";
     private static final String RFQ_ADS_DESTINATION = "/user/queue/rfq/ads";
     private static final String MY_RFQ_DESTINATION = "/user/queue/rfq/my";
+    private static final String POSITION_DESTINATION = "/user/queue/position";
+    private static final String SETTLEMENT_DESTINATION = "/user/queue/settlement";
     private static final String PIVOT_CURRENCY = "USD";
 
-    private final ObjectMapper mapper = new ObjectMapper();
+    private final ObjectMapper mapper = new ObjectMapper()
+            .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
     private final List<Asset> assets = new ArrayList<>();
     private final Map<String, Asset> assetMap = new HashMap<>();
     private final Map<String, Double> indexes = new ConcurrentHashMap<>();
     private final Map<String, RfqEntry> rfqMap = new ConcurrentHashMap<>();
+    private final Map<String, PositionEntry> positionMap = new ConcurrentHashMap<>();
     private final List<Triple<Supplier<CompletableFuture<Void>>, Double, String>> actions = new ArrayList<>();
 
     @Autowired
@@ -65,50 +73,72 @@ public class BotEngine extends StompSessionHandlerAdapter {
     @Autowired
     private WebSocketStompClient stompClient;
 
-    @Value("${busywhale.websocket.url}")
+    @Value("${WEBSOCKET_URL}")
     private String websocketUrl;
 
-    @Value("${bot.action.create_rfq.chance:0.0}")
+    @Value("${CHANCE_CREATE_RFQ:0.0}")
     private double tossCreateRfq;
 
-    @Value("${bot.action.modify_rfq.chance:0.0}")
+    @Value("${CHANCE_MODIFY_RFQ:0.0}")
     private double tossModifyRfq;
 
-    @Value("${bot.action.modify_rfq.update.chance:0.5}")
+    @Value("${CHANCE_MODIFY_RFQ_UPDATE:0.5}")
     private double tossModifyRfqUpdate;
 
-    @Value("${bot.action.create_offer.chance:0.0}")
+    @Value("${CHANCE_CREATE_OFFER:0.0}")
     private double tossCreateOffer;
 
-    @Value("${bot.action.modify_offer.chance:0.0}")
+    @Value("${CHANCE_MODIFY_OFFER:0.0}")
     private double tossModifyOffer;
 
-    @Value("${bot.action.modify_offer.update.chance:0.5}")
+    @Value("${CHANCE_MODIFY_OFFER_UPDATE:0.5}")
     private double tossModifyOfferUpdate;
 
-    @Value("${bot.action.answer_offer.chance:0.0}")
+    @Value("${CHANGE_ANSWER_OFFER:0.0}")
     private double tossAnswerOffer;
 
-    @Value("${bot.action.answer_offer.accept.chance:0.5}")
+    @Value("${CHANCE_ANSWER_OFFER_ACCEPT:0.5}")
     private double tossAnswerOfferAccept;
 
-    @Value("${bot.action.create_counter.chance:0.0}")
+    @Value("${CHANCE_CREATE_COUNTER:0.0}")
     private double tossCreateCounter;
 
-    @Value("${bot.action.modify_counter.chance:0.0}")
+    @Value("${CHANCE_MODIFY_COUNTER:0.0}")
     private double tossModifyCounter;
 
-    @Value("${bot.action.modify_counter.update.chance:0.5}")
+    @Value("${CHANCE_MODIFY_COUNTER_UPDATE:0.5}")
     private double tossModifyCounterUpdate;
 
-    @Value("${bot.action.answer_counter.chance:0.0}")
+    @Value("${CHANGE_ANSWER_COUNTER:0.0}")
     private double tossAnswerCounter;
 
-    @Value("${bot.action.answer_counter.accept.chance:0.5}")
+    @Value("${CHANCE_ANSWER_COUNTER_ACCEPT:0.5}")
     private double tossAnswerCounterAccept;
 
-    @Value("${external.rates.fiat.url:-}")
+    @Value("${UPDATE_EXPIRING_ITEMS_ONLY:true}")
+    private boolean updateExpiringItemsOnly;
+
+    // remaining ttl in seconds for expiring rfqs/offers
+    @Value("${EXPIRY_BUFFER:5}")
+    private long expiryBuffer;
+
+    @Value("${EXTERNAL_RATES_FIAT_URL:-}")
     private String externalFiatRatesUrl;
+
+    @Value("${USE_MINIMUM_TTL:true}")
+    private boolean useMinTtl;
+
+    @Value("${SINGLE_ITEM_PER_ACTION:false}")
+    private boolean singleItemPerAction;
+
+    @Value("${MARKET_WIDTH:0.002}")
+    private double marketWidth;
+
+    @Value("#{'${ENABLED_ASSETS_FOR_OFFER:}'.split(',')}")
+    private Set<String> enabledAssetsForOffer;
+
+    @Value("${MAX_RANDOM_QTY_NOTIONAL:5000}")
+    private double maxNotionalForRandomQty;
 
     private boolean isShuttingDown = false;
     private boolean isConnected = false;
@@ -129,7 +159,7 @@ public class BotEngine extends StompSessionHandlerAdapter {
         isShuttingDown = true;
     }
 
-    @Scheduled(fixedDelayString = "${bot.action.interval:10000}")
+    @Scheduled(fixedDelayString = "${ACTION_INTERVAL:10000}")
     public void doAction() {
         if (!isConnected) {
             // no performing any action if it's not connected
@@ -137,14 +167,14 @@ public class BotEngine extends StompSessionHandlerAdapter {
         }
         actions.forEach(action -> {
             if (toss(action.getMiddle())) {
-                logger.debug("Performing action: {}", action.getRight());
+                logger.trace("Performing action: {}", action.getRight());
                 try {
                     action.getLeft().get().get(TIMEOUT, TimeUnit.SECONDS);
                 } catch (ExecutionException | InterruptedException | TimeoutException e) {
                     logger.error("Timed out when {}", action.getRight());
                 }
             } else {
-                logger.debug("Skipping: {}", action.getRight());
+                logger.trace("Skipping: {}", action.getRight());
             }
         });
     }
@@ -156,6 +186,8 @@ public class BotEngine extends StompSessionHandlerAdapter {
         session.subscribe(INDEX_SNAPSHOTS_DESTINATION, this);
         session.subscribe(RFQ_ADS_DESTINATION, this);
         session.subscribe(MY_RFQ_DESTINATION, this);
+        session.subscribe(POSITION_DESTINATION, this);
+        session.subscribe(SETTLEMENT_DESTINATION, this);
 
         apiEngine.getMyRfqs()
                 .thenAccept(list -> {
@@ -174,6 +206,16 @@ public class BotEngine extends StompSessionHandlerAdapter {
                         handleRfqAdsFeed(pendingRfqAdPayloads.remove(0));
                     }
                     isRfqAdSnapshotReady = true;
+                });
+        apiEngine.getPositions()
+                .thenAccept(list -> {
+                    logger.info("Received {} positions", list.size());
+                    list.forEach(this::handlePosition);
+                });
+        apiEngine.getSettlements()
+                .thenAccept(list -> {
+                    logger.info("Received {} settlements", list.size());
+                    list.forEach(this::handleSettlement);
                 });
     }
 
@@ -199,32 +241,38 @@ public class BotEngine extends StompSessionHandlerAdapter {
             }
             return;
         }
-        if (message.getCommand() == StompCommand.MESSAGE) {
+        if (message.command() == StompCommand.MESSAGE) {
             String destination = headers.getDestination();
             if (destination == null) {
                 return;
             }
             switch (destination) {
                 case INDEX_SNAPSHOTS_DESTINATION:
-                    handleIndexSnapshotFeed(message.getMessage());
+                    handleIndexSnapshotFeed(message.message());
                     break;
                 case RFQ_ADS_DESTINATION:
                     if (!isRfqAdSnapshotReady) {
-                        pendingRfqAdPayloads.add(message.getMessage());
+                        pendingRfqAdPayloads.add(message.message());
                     } else {
-                        handleRfqAdsFeed(message.getMessage());
+                        handleRfqAdsFeed(message.message());
                     }
                     break;
                 case MY_RFQ_DESTINATION:
                     if (!isMyRfqSnapshotReady) {
-                        pendingMyRfqPayloads.add(message.getMessage());
+                        pendingMyRfqPayloads.add(message.message());
                     } else {
-                        handleMyRfqFeed(message.getMessage());
+                        handleMyRfqFeed(message.message());
                     }
                     break;
+                case POSITION_DESTINATION:
+                    handlePositionFeed(message.message());
+                    break;
+                case SETTLEMENT_DESTINATION:
+                    handleSettlementFeed(message.message());
+                    break;
             }
-        } else if (message.getCommand() == StompCommand.ERROR) {
-            logger.error("Stomp ERROR: {}", message.getMessage());
+        } else if (message.command() == StompCommand.ERROR) {
+            logger.error("Stomp ERROR: {}", message.message());
             handleError();
         }
     }
@@ -273,7 +321,7 @@ public class BotEngine extends StompSessionHandlerAdapter {
                     apiEngine.getAssets()
                             .thenAccept(list -> {
                                 assets.addAll(list);
-                                list.forEach(a -> assetMap.put(a.getSymbol(), a));
+                                list.forEach(a -> assetMap.put(a.symbol(), a));
                             }),
                     apiEngine.getIndexSnapshots()
                             .thenAccept(indexes::putAll)
@@ -298,6 +346,40 @@ public class BotEngine extends StompSessionHandlerAdapter {
             indexes.putIfAbsent(PIVOT_CURRENCY, 1.0);
         } catch (Exception e) {
             logger.error("Failed to load fiat rates from external source", e);
+        }
+    }
+
+    private void loadPositions() {
+        try {
+            logger.info("Loading positions...");
+        } catch (Exception e) {
+            logger.error("Failed to load positions", e);
+        }
+    }
+
+    private void loadSettlements() {
+        try {
+            logger.info("Loading settlements...");
+
+        } catch (Exception e) {
+            logger.error("Failed to load settlements", e);
+        }
+    }
+
+    private void loadMyRfqs() {
+        try {
+            logger.info("Loading my own RFQs...");
+        } catch (Exception e) {
+            logger.error("Failed to load my own RFQs", e);
+        }
+    }
+
+    private void loadRfqAds() {
+        try {
+            logger.info("Loading RFQ ads...");
+
+        } catch (Exception e) {
+            logger.error("Failed to load RFQ ads", e);
         }
     }
 
@@ -365,6 +447,45 @@ public class BotEngine extends StompSessionHandlerAdapter {
         }
     }
 
+    private void handlePositionFeed(String payload) {
+        logger.debug("Received position feed: {}", payload);
+
+        try {
+            JsonNode node = mapper.readTree(payload);
+            JsonNode positionsNode = node.path("positions");
+            if (!positionsNode.isMissingNode()) {
+                ArrayNode arrayNode = (ArrayNode) positionsNode;
+                StreamSupport.stream(arrayNode.spliterator(), false)
+                        .map(dataNode -> {
+                            try {
+                                return mapper.treeToValue(dataNode, PositionEntry.class);
+                            } catch (Exception ignored) {
+                                return null;
+                            }
+                        })
+                        .filter(Objects::nonNull)
+                        .forEach(this::handlePosition);
+            }
+        } catch (IOException e) {
+            logger.error("Failed to parse position feed data");
+        }
+    }
+
+    private void handleSettlementFeed(String payload) {
+        logger.debug("Received settlement feed: {}", payload);
+
+        try {
+            JsonNode node = mapper.readTree(payload);
+            JsonNode settlementNode = node.path("settlement");
+            if (!settlementNode.isMissingNode()) {
+                SettlementEntry settlementEntry = mapper.treeToValue(settlementNode, SettlementEntry.class);
+                handleSettlement(settlementEntry);
+            }
+        } catch (IOException e) {
+            logger.error("Failed to parse settlement feed data", e);
+        }
+    }
+
     private void handleRfqAd(RfqEntry rfqEntry) {
         String rfqId = rfqEntry.getId();
         if (rfqEntry.getStatus() == RfqStatus.DONE) {
@@ -391,6 +512,20 @@ public class BotEngine extends StompSessionHandlerAdapter {
             mergeRfqOffers(rfqEntry, oldRfqEntry);
         } else {
             rfqMap.put(rfqId, rfqEntry);
+        }
+    }
+
+    private void handlePosition(PositionEntry positionEntry) {
+        PositionEntry existing = positionMap.get(positionEntry.getAsset());
+        if (existing == null || positionEntry.getUpdateTime() > existing.getUpdateTime()) {
+            positionMap.put(positionEntry.getAsset(), positionEntry);
+        }
+    }
+
+    private void handleSettlement(SettlementEntry settlementEntry) {
+        switch (settlementEntry.getStatus()) {
+            case PENDING_ACCEPT -> apiEngine.acceptSettlement(settlementEntry.getId());
+            case PENDING_SETTLE, PENDING_BOTH_SETTLE -> apiEngine.performSettlement(settlementEntry.getId());
         }
     }
 
@@ -458,12 +593,20 @@ public class BotEngine extends StompSessionHandlerAdapter {
         Optional.ofNullable(offerDetails.getExpiryTime()).ifPresent(oldOfferDetails::setExpiryTime);
     }
 
+    private boolean shouldUpdateItem(long expiry) {
+        return !updateExpiringItemsOnly || expiry - Instant.now().getEpochSecond() <= expiryBuffer;
+    }
+
     private CompletableFuture<Void> createRfq() {
-        String baseAsset = getRandomAsset(assets, true, null).getSymbol();
-        String quoteAsset = getRandomAsset(assets, false, baseAsset).getSymbol();
+        String baseAsset = getRandomAsset(assets, true, null).symbol();
+        String quoteAsset = getRandomAsset(assets, true, baseAsset).symbol();
         Side side = getRandomSide(true);
-        int ttl = getRandomTtl();
-        double qty = getRandomQty(null);
+        int ttl = getSuggestedTtl(false, useMinTtl);
+        // qty capped at 5000 USDT
+        double qtyBound = Optional.ofNullable(indexes.get(baseAsset))
+                .map(i -> i > 0 ? maxNotionalForRandomQty / i : maxNotionalForRandomQty)
+                .orElse(maxNotionalForRandomQty);
+        double qty = getRandomQty(qtyBound);
 
         return apiEngine.createRfq(
                 baseAsset,
@@ -477,20 +620,23 @@ public class BotEngine extends StompSessionHandlerAdapter {
     private CompletableFuture<Void> updateRfq() {
         RfqEntry targetRfq = getEditableRfq();
         if (targetRfq == null) {
-            logger.info("No eligible RFQ to update/cancel");
+            logger.trace("No eligible RFQ to update/cancel");
             return CompletableFuture.completedFuture(null);
         }
         if (toss(tossModifyRfqUpdate)) {
-            return apiEngine.updateRfq(
-                    targetRfq.getId(),
-                    getRandomTtl()
-            );
+            if (shouldUpdateItem(targetRfq.getExpiryTime())) {
+                return apiEngine.updateRfq(
+                        targetRfq.getId(),
+                        getSuggestedTtl(false, useMinTtl)
+                );
+            }
+            return CompletableFuture.completedFuture(null);
         } else if (isCancellable(targetRfq)) {
             return apiEngine.cancelRfq(
                     targetRfq.getId()
             );
         } else {
-            logger.info("Selected RFQ is not cancellable.");
+            logger.trace("Selected RFQ is not cancellable.");
             return CompletableFuture.completedFuture(null);
         }
     }
@@ -503,95 +649,97 @@ public class BotEngine extends StompSessionHandlerAdapter {
         List<RfqEntry> eligibleRfqs = rfqMap.values().stream()
                 .filter(rfq -> rfq.getStatus() == RfqStatus.ACTIVE &&
                         rfq.getRequester() != null &&
+                        (enabledAssetsForOffer.contains(rfq.getBaseAsset()) || enabledAssetsForOffer.contains(rfq.getQuoteAsset())) &&
                         ListUtils.emptyIfNull(rfq.getOffers())
                                 .stream()
                                 .noneMatch(offerEntry -> offerEntry.getOfferor() == null)
                 )
                 .collect(Collectors.toList());
-        RfqEntry targetRfq = getRandomFromList(eligibleRfqs);
-        if (targetRfq == null) {
-            logger.info("No eligible RFQ for creating offer");
+        List<RfqEntry> targetRfqs = singleItemPerAction ?
+                Optional.ofNullable(getRandomFromList(eligibleRfqs)).map(List::of).orElse(Collections.emptyList()) :
+                eligibleRfqs;
+        if (CollectionUtils.isEmpty(targetRfqs)) {
+            logger.trace("No eligible RFQ for creating offer");
             return CompletableFuture.completedFuture(null);
         }
-        double reference = getReferencePrice(targetRfq.getBaseAsset(), targetRfq.getQuoteAsset());
-        if (reference == 0.0) {
-            logger.warn("No reference price for creating offer: baseAsset={}, quoteAsset={}", targetRfq.getBaseAsset(), targetRfq.getQuoteAsset());
-            return CompletableFuture.completedFuture(null);
+        List<CompletableFuture<Void>> futures = new ArrayList<>();
+        for (RfqEntry targetRfq : targetRfqs) {
+            double reference = getReferencePrice(targetRfq.getBaseAsset(), targetRfq.getQuoteAsset());
+            if (reference == 0.0) {
+                logger.warn("No reference price for creating offer: baseAsset={}, quoteAsset={}", targetRfq.getBaseAsset(), targetRfq.getQuoteAsset());
+                return CompletableFuture.completedFuture(null);
+            }
+            Side offerSide = switch (targetRfq.getSide()) {
+                case BUY -> Side.SELL;
+                case SELL -> Side.BUY;
+                default -> getRandomSide(true);
+            };
+            futures.add(apiEngine.createOffer(
+                    targetRfq.getId(),
+                    getSuggestedTtl(true, useMinTtl),
+                    offerSide != Side.SELL ? getRandomPrice(reference, marketWidth, Side.BUY) : null,
+                    offerSide != Side.SELL ? getRandomQty(targetRfq.getQty().doubleValue()) : null,
+                    offerSide != Side.BUY ? getRandomPrice(reference, marketWidth, Side.SELL) : null,
+                    offerSide != Side.BUY ? getRandomQty(targetRfq.getQty().doubleValue()) : null
+            ));
         }
-        Side offerSide;
-        switch (targetRfq.getSide()) {
-            case BUY:
-                offerSide = Side.SELL;
-                break;
-            case SELL:
-                offerSide = Side.BUY;
-                break;
-            default:
-                offerSide = getRandomSide(true);
-                break;
-        }
-        return apiEngine.createOffer(
-                targetRfq.getId(),
-                getRandomTtl(),
-                offerSide != Side.SELL ? getRandomPrice(reference, Side.BUY) : null,
-                offerSide != Side.SELL ? getRandomQty(targetRfq.getQty().doubleValue()) : null,
-                offerSide != Side.BUY ? getRandomPrice(reference, Side.SELL) : null,
-                offerSide != Side.BUY ? getRandomQty(targetRfq.getQty().doubleValue()) : null
-        );
+        return CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]));
     }
 
     private CompletableFuture<Void> updateOffer() {
-        Pair<RfqEntry, OfferEntry> pair = getEditableOffer();
-        if (pair == null) {
-            logger.info("No eligible offer to update");
+        List<Pair<RfqEntry, OfferEntry>> editableOffers = getEditableOffers();
+        if (CollectionUtils.isEmpty(editableOffers)) {
+            logger.trace("No eligible offer to update");
             return CompletableFuture.completedFuture(null);
         }
-        RfqEntry targetRfq = pair.getLeft();
-        OfferEntry targetOffer = pair.getRight();
-        if (toss(tossModifyOfferUpdate)) {
-            double reference = getReferencePrice(targetRfq.getBaseAsset(), targetRfq.getQuoteAsset());
-            if (reference == 0.0) {
-                logger.warn("No reference price for updating offer: baseAsset={}, quoteAsset={}", targetRfq.getBaseAsset(), targetRfq.getQuoteAsset());
-                return CompletableFuture.completedFuture(null);
+        List<CompletableFuture<Void>> futures = new ArrayList<>();
+        for (Pair<RfqEntry, OfferEntry> pair : editableOffers) {
+            RfqEntry targetRfq = pair.getLeft();
+            OfferEntry targetOffer = pair.getRight();
+            if (toss(tossModifyOfferUpdate)) {
+                if (shouldUpdateItem(targetOffer.getOffer().getExpiryTime())) {
+                    double reference = getReferencePrice(targetRfq.getBaseAsset(), targetRfq.getQuoteAsset());
+                    if (reference == 0.0) {
+                        logger.warn("No reference price for updating offer: baseAsset={}, quoteAsset={}", targetRfq.getBaseAsset(), targetRfq.getQuoteAsset());
+                        futures.add(CompletableFuture.completedFuture(null));
+                        continue;
+                    }
+                    Side offerSide = switch (targetRfq.getSide()) {
+                        case BUY -> Side.SELL;
+                        case SELL -> Side.BUY;
+                        default -> getRandomSide(true);
+                    };
+                    futures.add(apiEngine.updateOffer(
+                            targetRfq.getId(),
+                            targetOffer.getId(),
+                            targetOffer.getOffer().getNonce(),
+                            getSuggestedTtl(true, useMinTtl),
+                            offerSide != Side.SELL ? getRandomPrice(reference, marketWidth, Side.BUY) : null,
+                            offerSide != Side.SELL ? getRandomQty(targetRfq.getQty().doubleValue()) : null,
+                            offerSide != Side.BUY ? getRandomPrice(reference, marketWidth, Side.SELL) : null,
+                            offerSide != Side.BUY ? getRandomQty(targetRfq.getQty().doubleValue()) : null
+                    ));
+                    continue;
+                }
+                futures.add(CompletableFuture.completedFuture(null));
+            } else if (isCancellable(targetOffer.getOffer())) {
+                futures.add(apiEngine.cancelOffer(
+                        targetRfq.getId(),
+                        targetOffer.getId(),
+                        targetOffer.getOffer().getNonce()
+                ));
+            } else {
+                logger.trace("Selected offer is not cancellable.");
+                futures.add(CompletableFuture.completedFuture(null));
             }
-            Side offerSide;
-            switch (targetRfq.getSide()) {
-                case BUY:
-                    offerSide = Side.SELL;
-                    break;
-                case SELL:
-                    offerSide = Side.BUY;
-                    break;
-                default:
-                    offerSide = getRandomSide(true);
-                    break;
-            }
-            return apiEngine.updateOffer(
-                    targetRfq.getId(),
-                    targetOffer.getId(),
-                    targetOffer.getOffer().getNonce(),
-                    getRandomTtl(),
-                    offerSide != Side.SELL ? getRandomPrice(reference, Side.BUY) : null,
-                    offerSide != Side.SELL ? getRandomQty(targetRfq.getQty().doubleValue()) : null,
-                    offerSide != Side.BUY ? getRandomPrice(reference, Side.SELL) : null,
-                    offerSide != Side.BUY ? getRandomQty(targetRfq.getQty().doubleValue()) : null
-            );
-        } else if (isCancellable(targetOffer.getOffer())) {
-            return apiEngine.cancelOffer(
-                    targetRfq.getId(),
-                    targetOffer.getId(),
-                    targetOffer.getOffer().getNonce()
-            );
-        } else {
-            logger.debug("Selected offer is not cancellable.");
-            return CompletableFuture.completedFuture(null);
         }
+        return CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]));
     }
 
     private CompletableFuture<Void> answerOffer() {
         Pair<RfqEntry, OfferEntry> pair = getAnswerableOffer();
         if (pair == null) {
-            logger.info("No offer to answer");
+            logger.trace("No offer to answer");
             return CompletableFuture.completedFuture(null);
         }
         RfqEntry targetRfq = pair.getLeft();
@@ -648,7 +796,7 @@ public class BotEngine extends StompSessionHandlerAdapter {
                 .collect(Collectors.toList());
         RfqEntry targetRfq = getRandomFromList(eligibleRfqs);
         if (targetRfq == null) {
-            logger.info("No eligible RFQ for creating counter-offer");
+            logger.trace("No eligible RFQ for creating counter-offer");
             return CompletableFuture.completedFuture(null);
         }
         List<OfferEntry> eligibleOffers = ListUtils.emptyIfNull(targetRfq.getOffers())
@@ -657,7 +805,7 @@ public class BotEngine extends StompSessionHandlerAdapter {
                 .collect(Collectors.toList());
         OfferEntry targetOffer = getRandomFromList(eligibleOffers);
         if (targetOffer == null) {
-            logger.info("No eligible offer for creating counter-offer");
+            logger.trace("No eligible offer for creating counter-offer");
             return CompletableFuture.completedFuture(null);
         }
         double reference = getReferencePrice(targetRfq.getBaseAsset(), targetRfq.getQuoteAsset());
@@ -668,10 +816,10 @@ public class BotEngine extends StompSessionHandlerAdapter {
         return apiEngine.createCounter(
                 targetRfq.getId(),
                 targetOffer.getId(),
-                getRandomTtl(),
-                targetOffer.getOffer().getAskPx() != null ? getRandomPrice(reference, Side.BUY) : null,
+                getSuggestedTtl(true, useMinTtl),
+                targetOffer.getOffer().getAskPx() != null ? getRandomPrice(reference, marketWidth, Side.BUY) : null,
                 targetOffer.getOffer().getAskQty() != null ? getRandomQty(targetOffer.getOffer().getAskQty().doubleValue()) : null,
-                targetOffer.getOffer().getBidPx() != null ? getRandomPrice(reference, Side.SELL) : null,
+                targetOffer.getOffer().getBidPx() != null ? getRandomPrice(reference, marketWidth, Side.SELL) : null,
                 targetOffer.getOffer().getBidQty() != null ? getRandomQty(targetOffer.getOffer().getBidQty().doubleValue()) : null
         );
     }
@@ -679,27 +827,30 @@ public class BotEngine extends StompSessionHandlerAdapter {
     private CompletableFuture<Void> updateCounter() {
         Pair<RfqEntry, OfferEntry> pair = getEditableCounterOffer();
         if (pair == null) {
-            logger.info("No eligible counter-offer to update");
+            logger.trace("No eligible counter-offer to update");
             return CompletableFuture.completedFuture(null);
         }
         RfqEntry targetRfq = pair.getLeft();
         OfferEntry targetOffer = pair.getRight();
         if (toss(tossModifyCounterUpdate)) {
-            double reference = getReferencePrice(targetRfq.getBaseAsset(), targetRfq.getQuoteAsset());
-            if (reference == 0.0) {
-                logger.warn("No reference price for sending counter-offer: baseAsset={}, quoteAsset={}", targetRfq.getBaseAsset(), targetRfq.getQuoteAsset());
-                return CompletableFuture.completedFuture(null);
+            if (shouldUpdateItem(targetOffer.getCounter().getExpiryTime())) {
+                double reference = getReferencePrice(targetRfq.getBaseAsset(), targetRfq.getQuoteAsset());
+                if (reference == 0.0) {
+                    logger.warn("No reference price for sending counter-offer: baseAsset={}, quoteAsset={}", targetRfq.getBaseAsset(), targetRfq.getQuoteAsset());
+                    return CompletableFuture.completedFuture(null);
+                }
+                return apiEngine.updateCounter(
+                        targetRfq.getId(),
+                        targetOffer.getId(),
+                        targetOffer.getCounter().getNonce(),
+                        getSuggestedTtl(true, useMinTtl),
+                        targetOffer.getOffer().getAskPx() != null ? getRandomPrice(reference, marketWidth, Side.BUY) : null,
+                        targetOffer.getOffer().getAskQty() != null ? getRandomQty(targetOffer.getOffer().getAskQty().doubleValue()) : null,
+                        targetOffer.getOffer().getBidPx() != null ? getRandomPrice(reference, marketWidth, Side.SELL) : null,
+                        targetOffer.getOffer().getBidQty() != null ? getRandomQty(targetOffer.getOffer().getBidQty().doubleValue()) : null
+                );
             }
-            return apiEngine.updateCounter(
-                    targetRfq.getId(),
-                    targetOffer.getId(),
-                    targetOffer.getCounter().getNonce(),
-                    getRandomTtl(),
-                    targetOffer.getOffer().getAskPx() != null ? getRandomPrice(reference, Side.BUY) : null,
-                    targetOffer.getOffer().getAskQty() != null ? getRandomQty(targetOffer.getOffer().getAskQty().doubleValue()) : null,
-                    targetOffer.getOffer().getBidPx() != null ? getRandomPrice(reference, Side.SELL) : null,
-                    targetOffer.getOffer().getBidQty() != null ? getRandomQty(targetOffer.getOffer().getBidQty().doubleValue()) : null
-            );
+            return CompletableFuture.completedFuture(null);
         } else if (isCancellable(targetOffer.getCounter())) {
             return apiEngine.cancelCounter(
                     targetRfq.getId(),
@@ -707,7 +858,7 @@ public class BotEngine extends StompSessionHandlerAdapter {
                     targetOffer.getCounter().getNonce()
             );
         } else {
-            logger.debug("Selected counter-offer is not cancellable.");
+            logger.trace("Selected counter-offer is not cancellable.");
             return CompletableFuture.completedFuture(null);
         }
     }
@@ -715,7 +866,7 @@ public class BotEngine extends StompSessionHandlerAdapter {
     private CompletableFuture<Void> answerCounter() {
         Pair<RfqEntry, OfferEntry> pair = getAnswerableCounterOffer();
         if (pair == null) {
-            logger.info("No eligible counter-offer to answer");
+            logger.trace("No eligible counter-offer to answer");
             return CompletableFuture.completedFuture(null);
         }
         RfqEntry targetRfq = pair.getLeft();
@@ -758,7 +909,7 @@ public class BotEngine extends StompSessionHandlerAdapter {
 
     private double getRateToUSD(String asset) {
         return Optional.ofNullable(assetMap.get(asset)).map(a -> {
-            double rateToUSD = ObjectUtils.defaultIfNull(indexes.get(a.getSymbol()), 0.0);
+            double rateToUSD = ObjectUtils.defaultIfNull(indexes.get(a.symbol()), 0.0);
             return a.isCrypto() || rateToUSD == 0.0 ?
                     rateToUSD :
                     (1 / rateToUSD);
@@ -777,7 +928,7 @@ public class BotEngine extends StompSessionHandlerAdapter {
         return getRandomFromList(eligibleRfqs);
     }
 
-    private Pair<RfqEntry, OfferEntry> getEditableOffer() {
+    private List<Pair<RfqEntry, OfferEntry>> getEditableOffers() {
         // entries in rfqMap:
         // - with requester
         // - with (single) offer
@@ -789,18 +940,19 @@ public class BotEngine extends StompSessionHandlerAdapter {
                 o.getOffer().getStatus() != OfferStatus.ENDED;
         List<RfqEntry> eligibleRfqs = rfqMap.values().stream()
                 .filter(rfq -> rfq.getRequester() != null &&
+                        rfq.getStatus() == RfqStatus.ACTIVE &&  // update offers for active RFQs only
                         CollectionUtils.isNotEmpty(rfq.getOffers()) &&
                         rfq.getOffers()
                                 .stream()
                                 .anyMatch(offerEntryPredicate)
                 )
                 .collect(Collectors.toList());
-        RfqEntry targetRfq = getRandomFromList(eligibleRfqs);
-        if (targetRfq == null) {
-            return null;
-        }
-        OfferEntry targetOffer = targetRfq.getOffers().get(0);
-        return Pair.of(targetRfq, targetOffer);
+        List<RfqEntry> targetRfqs = singleItemPerAction ?
+                Optional.ofNullable(getRandomFromList(eligibleRfqs)).map(List::of).orElse(Collections.emptyList()) :
+                eligibleRfqs;
+        return targetRfqs.stream()
+                .map(rfq -> Pair.of(rfq, rfq.getOffers().get(0)))
+                .toList();
     }
 
     private Pair<RfqEntry, OfferEntry> getAnswerableOffer() {

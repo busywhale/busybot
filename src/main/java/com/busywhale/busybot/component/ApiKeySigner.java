@@ -1,6 +1,7 @@
 package com.busywhale.busybot.component;
 
 import com.google.common.hash.Hashing;
+import jakarta.annotation.PostConstruct;
 import org.apache.commons.codec.binary.Base64;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.logging.log4j.LogManager;
@@ -8,7 +9,6 @@ import org.apache.logging.log4j.Logger;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
-import javax.annotation.PostConstruct;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.Map;
@@ -20,10 +20,10 @@ public class ApiKeySigner {
     private static final String HEADER_TIMESTAMP = "bw-timestamp";
     private static final String HEADER_SIGNATURE = "bw-signature";
 
-    @Value("${bot.api.key:}")
+    @Value("${API_KEY:}")
     private String apiKey;
 
-    @Value("${bot.api.secret:}")
+    @Value("${API_SECRET:}")
     private String apiSecret;
 
     @PostConstruct

@@ -1,6 +1,8 @@
 package com.busywhale.busybot.config;
 
 import com.busywhale.busybot.websocket.WebSocketMessageConverter;
+import jakarta.websocket.ContainerProvider;
+import jakarta.websocket.WebSocketContainer;
 import org.apache.http.conn.ssl.NoopHostnameVerifier;
 import org.apache.http.conn.ssl.TrustAllStrategy;
 import org.apache.http.impl.client.CloseableHttpClient;
@@ -25,8 +27,6 @@ import javax.net.ssl.HttpsURLConnection;
 import javax.net.ssl.SSLContext;
 import javax.net.ssl.TrustManager;
 import javax.net.ssl.X509TrustManager;
-import javax.websocket.ContainerProvider;
-import javax.websocket.WebSocketContainer;
 import java.security.cert.X509Certificate;
 import java.util.ArrayList;
 import java.util.List;
@@ -51,7 +51,7 @@ public class SpringConfiguration implements AsyncConfigurer {
 
     @Bean
     public CloseableHttpClient closeableHttpClient(
-            @Value("${bot.verify_ssl.enabled:true}")
+            @Value("${VERIFY_SSL:true}")
             boolean verifySsl
     ) throws Exception {
         if (!verifySsl) {
@@ -67,7 +67,7 @@ public class SpringConfiguration implements AsyncConfigurer {
 
     @Bean
     public WebSocketStompClient webSocketClient(
-            @Value("${bot.verify_ssl.enabled:true}")
+            @Value("${VERIFY_SSL:true}")
             boolean verifySsl
     ) throws Exception {
         WebSocketContainer container = ContainerProvider.getWebSocketContainer();
@@ -98,13 +98,13 @@ public class SpringConfiguration implements AsyncConfigurer {
         WebSocketStompClient stompClient = new WebSocketStompClient(new SockJsClient(transports));
         stompClient.setInboundMessageSizeLimit(1024 * 1024);
         stompClient.setMessageConverter(new WebSocketMessageConverter());
-        stompClient.setTaskScheduler(heartBeatScheduler());
+        stompClient.setTaskScheduler(taskScheduler());
         //stompClient.setMessageConverter(new StringMessageConverter());
         return stompClient;
     }
 
     @Bean
-    public TaskScheduler heartBeatScheduler() {
+    public TaskScheduler taskScheduler() {
         return new ThreadPoolTaskScheduler();
     }
 }

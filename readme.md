@@ -4,7 +4,7 @@ A simple bot implementation for BusyWhale RFQ platform.
 ### Running BusyBot in Docker
 1. Building docker image
 
-   `docker build -f dockerbuild/busybot_build -t busybot:local .`
+   `cd docker; docker build -f busybot_build -t busybot:local ../`
 
 2. Configuring Docker-Compose `docker-compose.yml` and `.env`
 

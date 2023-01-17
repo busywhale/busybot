@@ -1,0 +1,32 @@
+# 1. Building JAR
+FROM maven:3.8-eclipse-temurin-17 AS build
+
+ADD . /build
+WORKDIR /build
+RUN mvn install -B
+
+# 2. Copying JAR for runtime
+FROM eclipse-temurin:17-jre-jammy
+
+ENV JAR_FILE=/busybot/busybot-1.0.0.jar
+COPY --from=build /build/target/*.jar /busybot/
+WORKDIR /busybot
+
+# RUN
+CMD exec java \
+##################################
+#        Server Behaviour        #
+##################################
+-XX:+UseG1GC \
+-Xms1g \
+-Xmx8g \
+-Dspring.profiles.active=release \
+#########################
+#        Logging        #
+#########################
+-Dlog.level=${LOG_LEVEL:-info} \
+-Dlog.path=/var/log/busybot \
+##########################
+#        JAR File        #
+##########################
+-jar ${JAR_FILE}
