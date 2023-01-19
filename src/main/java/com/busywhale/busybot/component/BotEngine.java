@@ -40,6 +40,7 @@ import java.util.concurrent.*;
 import java.util.function.Predicate;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 import java.util.stream.StreamSupport;
 
 import static com.busywhale.busybot.util.BotUtils.*;
@@ -159,7 +160,30 @@ public class BotEngine extends StompSessionHandlerAdapter {
 
     @PreDestroy
     public void preDestroy() {
+        logger.info("Pulling all active RFQs...");
+        List<CompletableFuture<Void>> pullRfqFutures = getEditableRfqs().stream()
+                .map(rfq -> apiEngine.cancelRfq(rfq.getId()))
+                .toList();
+
+        logger.info("Pulling all active offers...");
+        List<CompletableFuture<Void>> pullOfferFutures = getEditableOffers().stream().map(pair -> {
+            RfqEntry rfqEntry = pair.getLeft();
+            OfferEntry offerEntry = pair.getRight();
+            return apiEngine.cancelOffer(
+                    rfqEntry.getId(),
+                    offerEntry.getId(),
+                    offerEntry.getOffer().getNonce()
+            );
+        }).toList();
+
+        CompletableFuture.allOf(
+                Stream.of(pullRfqFutures, pullOfferFutures)
+                        .flatMap(Collection::stream)
+                        .toArray(CompletableFuture[]::new)
+        ).join();
+
         isShuttingDown = true;
+        logger.info("All active RFQs and offers have been pulled.");
     }
 
     @Scheduled(fixedDelayString = "${ACTION_INTERVAL:10000}")
@@ -633,7 +657,7 @@ public class BotEngine extends StompSessionHandlerAdapter {
     }
 
     private CompletableFuture<Void> updateRfq() {
-        RfqEntry targetRfq = getEditableRfq();
+        RfqEntry targetRfq = getRandomFromList(getEditableRfqs());
         if (targetRfq == null) {
             logger.trace("No eligible RFQ to update/cancel");
             return CompletableFuture.completedFuture(null);
@@ -931,16 +955,15 @@ public class BotEngine extends StompSessionHandlerAdapter {
         }).orElse(0.0);
     }
 
-    private RfqEntry getEditableRfq() {
+    private List<RfqEntry> getEditableRfqs() {
         // entries in rfqMap
         // - not done
         // - with no requester
-        List<RfqEntry> eligibleRfqs = rfqMap.values().stream()
+        return rfqMap.values().stream()
                 .filter(rfq -> rfq.getStatus() != RfqStatus.DONE &&
                         rfq.getRequester() == null
                 )
-                .collect(Collectors.toList());
-        return getRandomFromList(eligibleRfqs);
+                .toList();
     }
 
     private List<Pair<RfqEntry, OfferEntry>> getEditableOffers() {
@@ -961,7 +984,7 @@ public class BotEngine extends StompSessionHandlerAdapter {
                                 .stream()
                                 .anyMatch(offerEntryPredicate)
                 )
-                .collect(Collectors.toList());
+                .toList();
         List<RfqEntry> targetRfqs = singleItemPerAction ?
                 Optional.ofNullable(getRandomFromList(eligibleRfqs)).map(List::of).orElse(Collections.emptyList()) :
                 eligibleRfqs;
