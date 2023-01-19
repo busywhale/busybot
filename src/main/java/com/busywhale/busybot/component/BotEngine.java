@@ -140,6 +140,9 @@ public class BotEngine extends StompSessionHandlerAdapter {
     @Value("${MAX_RANDOM_QTY_NOTIONAL:5000}")
     private double maxNotionalForRandomQty;
 
+    @Value("${MAX_LIVE_RFQS_PER_USER:20}")
+    private int maxLiveRfqsPerUser;
+
     private boolean isShuttingDown = false;
     private boolean isConnected = false;
     private boolean isRfqAdSnapshotReady = false;
@@ -601,13 +604,22 @@ public class BotEngine extends StompSessionHandlerAdapter {
     }
 
     private CompletableFuture<Void> createRfq() {
+        Long myLiveRfqCount = rfqMap.values().stream()
+                .filter(rfq -> rfq.getRequester() == null)
+                .count();
+        if (myLiveRfqCount >= maxLiveRfqsPerUser) {
+            logger.info("Not creating new RFQ as this would exceed max live RFQ count of {}", maxLiveRfqsPerUser);
+            return CompletableFuture.completedFuture(null);
+        }
+
         String baseAsset = getRandomAsset(assets, true, null).symbol();
         String quoteAsset = getRandomAsset(assets, true, baseAsset).symbol();
         Side side = getRandomSide(true);
         int ttl = getSuggestedTtl(false, useMinTtl);
         // qty capped at 5000 USDT
         double qtyBound = Optional.ofNullable(indexes.get(baseAsset))
-                .map(i -> i > 0 ? maxNotionalForRandomQty / i : maxNotionalForRandomQty)
+                .filter(i -> i > 0)
+                .map(i -> maxNotionalForRandomQty / i)
                 .orElse(maxNotionalForRandomQty);
         double qty = getRandomQty(qtyBound);
 
