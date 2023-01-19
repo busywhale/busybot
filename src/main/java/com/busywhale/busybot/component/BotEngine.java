@@ -583,10 +583,13 @@ public class BotEngine extends StompSessionHandlerAdapter {
     private void copyOfferDetails(OfferDetails offerDetails, OfferDetails oldOfferDetails) {
         Optional.ofNullable(offerDetails.getNonce()).ifPresent(oldOfferDetails::setNonce);
         Optional.ofNullable(offerDetails.getStatus()).ifPresent(oldOfferDetails::setStatus);
-        Optional.ofNullable(offerDetails.getBidPx()).ifPresent(oldOfferDetails::setBidPx);
-        Optional.ofNullable(offerDetails.getBidQty()).ifPresent(oldOfferDetails::setBidQty);
-        Optional.ofNullable(offerDetails.getAskPx()).ifPresent(oldOfferDetails::setAskPx);
-        Optional.ofNullable(offerDetails.getAskQty()).ifPresent(oldOfferDetails::setAskQty);
+        // update bid/ask only if they're being updated, offer for both-sided RFQs can change from bid-only to ask-only
+        if (offerDetails.getBidPx() != null || offerDetails.getBidQty() != null || offerDetails.getAskPx() != null || offerDetails.getAskQty() != null) {
+            oldOfferDetails.setBidPx(offerDetails.getBidPx());
+            oldOfferDetails.setBidQty(offerDetails.getBidQty());
+            oldOfferDetails.setAskPx(offerDetails.getAskPx());
+            oldOfferDetails.setAskQty(offerDetails.getAskQty());
+        }
         Optional.ofNullable(offerDetails.getTtl()).ifPresent(oldOfferDetails::setTtl);
         Optional.ofNullable(offerDetails.getCreateTime()).ifPresent(oldOfferDetails::setCreateTime);
         Optional.ofNullable(offerDetails.getUpdateTime()).ifPresent(oldOfferDetails::setUpdateTime);
