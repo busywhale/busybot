@@ -1065,12 +1065,16 @@ public class BotEngine extends StompSessionHandlerAdapter {
     private boolean isCancellable(RfqEntry rfqEntry) {
         // only active rfq is cancellable
         return rfqEntry != null &&
-                rfqEntry.getStatus() == RfqStatus.ACTIVE;
+                rfqEntry.getStatus() == RfqStatus.ACTIVE &&
+                // in order to avoid cancelling expiring RFQ
+                rfqEntry.getExpiryTime() - Instant.now().getEpochSecond() > 1;
     }
 
     private boolean isCancellable(OfferDetails offerDetails) {
         // only active offer/counter is cancellable
         return offerDetails != null &&
-                offerDetails.getStatus() == OfferStatus.ACTIVE;
+                offerDetails.getStatus() == OfferStatus.ACTIVE &&
+                // in order to avoid cancelling expiring offers
+                offerDetails.getExpiryTime() - Instant.now().getEpochSecond() > 1;
     }
 }
