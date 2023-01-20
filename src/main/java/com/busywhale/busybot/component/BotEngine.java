@@ -129,8 +129,9 @@ public class BotEngine extends StompSessionHandlerAdapter {
     @Value("${USE_MINIMUM_TTL:true}")
     private boolean useMinTtl;
 
-    @Value("${SINGLE_ITEM_PER_ACTION:false}")
-    private boolean singleItemPerAction;
+    // managing multiple offers at a time if true
+    @Value("${QUOTING_MODE:false}")
+    private boolean quotingMode;
 
     @Value("${MARKET_WIDTH:0.002}")
     private double marketWidth;
@@ -143,6 +144,9 @@ public class BotEngine extends StompSessionHandlerAdapter {
 
     @Value("${MAX_LIVE_RFQS_PER_USER:20}")
     private int maxLiveRfqsPerUser;
+
+    @Value("${DEBUG_PRINT_INDEX_SNAPSHOT:false}")
+    private boolean printIndexSnapshot;
 
     private boolean isShuttingDown = false;
     private boolean isConnected = false;
@@ -216,34 +220,10 @@ public class BotEngine extends StompSessionHandlerAdapter {
         session.subscribe(POSITION_DESTINATION, this);
         session.subscribe(SETTLEMENT_DESTINATION, this);
 
-        apiEngine.getMyRfqs()
-                .thenAccept(list -> {
-                    logger.info("Received {} own RFQs", list.size());
-                    list.forEach(this::handleMyRfq);
-                    while (!pendingMyRfqPayloads.isEmpty()) {
-                        handleMyRfqFeed(pendingMyRfqPayloads.remove(0));
-                    }
-                    isMyRfqSnapshotReady = true;
-                });
-        apiEngine.getRfqAds()
-                .thenAccept(list -> {
-                    logger.info("Received {} RFQ ads", list.size());
-                    list.forEach(this::handleRfqAd);
-                    while (!pendingRfqAdPayloads.isEmpty()) {
-                        handleRfqAdsFeed(pendingRfqAdPayloads.remove(0));
-                    }
-                    isRfqAdSnapshotReady = true;
-                });
-        apiEngine.getPositions()
-                .thenAccept(list -> {
-                    logger.info("Received {} positions", list.size());
-                    list.forEach(this::handlePosition);
-                });
-        apiEngine.getSettlements()
-                .thenAccept(list -> {
-                    logger.info("Received {} settlements", list.size());
-                    list.forEach(this::handleSettlement);
-                });
+        loadMyRfqs();
+        loadRfqAds();
+        loadPositions();
+        loadSettlements();
     }
 
     @Override
@@ -379,6 +359,11 @@ public class BotEngine extends StompSessionHandlerAdapter {
     private void loadPositions() {
         try {
             logger.info("Loading positions...");
+            apiEngine.getPositions()
+                    .thenAccept(list -> {
+                        logger.info("Received {} positions", list.size());
+                        list.forEach(this::handlePosition);
+                    });
         } catch (Exception e) {
             logger.error("Failed to load positions", e);
         }
@@ -387,7 +372,11 @@ public class BotEngine extends StompSessionHandlerAdapter {
     private void loadSettlements() {
         try {
             logger.info("Loading settlements...");
-
+            apiEngine.getSettlements()
+                    .thenAccept(list -> {
+                        logger.info("Received {} settlements", list.size());
+                        list.forEach(this::handleSettlement);
+                    });
         } catch (Exception e) {
             logger.error("Failed to load settlements", e);
         }
@@ -396,6 +385,15 @@ public class BotEngine extends StompSessionHandlerAdapter {
     private void loadMyRfqs() {
         try {
             logger.info("Loading my own RFQs...");
+            apiEngine.getMyRfqs()
+                    .thenAccept(list -> {
+                        logger.info("Received {} own RFQs", list.size());
+                        list.forEach(this::handleMyRfq);
+                        while (!pendingMyRfqPayloads.isEmpty()) {
+                            handleMyRfqFeed(pendingMyRfqPayloads.remove(0));
+                        }
+                        isMyRfqSnapshotReady = true;
+                    });
         } catch (Exception e) {
             logger.error("Failed to load my own RFQs", e);
         }
@@ -404,7 +402,15 @@ public class BotEngine extends StompSessionHandlerAdapter {
     private void loadRfqAds() {
         try {
             logger.info("Loading RFQ ads...");
-
+            apiEngine.getRfqAds()
+                    .thenAccept(list -> {
+                        logger.info("Received {} RFQ ads", list.size());
+                        list.forEach(this::handleRfqAd);
+                        while (!pendingRfqAdPayloads.isEmpty()) {
+                            handleRfqAdsFeed(pendingRfqAdPayloads.remove(0));
+                        }
+                        isRfqAdSnapshotReady = true;
+                    });
         } catch (Exception e) {
             logger.error("Failed to load RFQ ads", e);
         }
@@ -426,8 +432,9 @@ public class BotEngine extends StompSessionHandlerAdapter {
     }
 
     private void handleIndexSnapshotFeed(String payload) {
-        logger.debug("Received index snapshot: {}", payload);
-
+        if (printIndexSnapshot) {
+            logger.debug("Received index snapshot: {}", payload);
+        }
         try {
             JsonNode node = mapper.readTree(payload);
             JsonNode indexesNode = node.path("indexes").path("indexes");
@@ -628,11 +635,15 @@ public class BotEngine extends StompSessionHandlerAdapter {
     }
 
     private CompletableFuture<Void> createRfq() {
-        Long myLiveRfqCount = rfqMap.values().stream()
+        List<RfqEntry> myLiveRfqs = rfqMap.values().stream()
                 .filter(rfq -> rfq.getRequester() == null)
-                .count();
-        if (myLiveRfqCount >= maxLiveRfqsPerUser) {
-            logger.info("Not creating new RFQ as this would exceed max live RFQ count of {}", maxLiveRfqsPerUser);
+                .toList();
+        if (myLiveRfqs.size() >= maxLiveRfqsPerUser) {
+            logger.info("Not creating new RFQ as this would exceed max live RFQ count of {}: {} active, {} expired",
+                    maxLiveRfqsPerUser,
+                    myLiveRfqs.stream().filter(rfq -> rfq.getStatus() == RfqStatus.ACTIVE).count(),
+                    myLiveRfqs.stream().filter(rfq -> rfq.getStatus() == RfqStatus.EXPIRED).count()
+            );
             return CompletableFuture.completedFuture(null);
         }
 
@@ -694,9 +705,9 @@ public class BotEngine extends StompSessionHandlerAdapter {
                                 .noneMatch(offerEntry -> offerEntry.getOfferor() == null)
                 )
                 .collect(Collectors.toList());
-        List<RfqEntry> targetRfqs = singleItemPerAction ?
-                Optional.ofNullable(getRandomFromList(eligibleRfqs)).map(List::of).orElse(Collections.emptyList()) :
-                eligibleRfqs;
+        List<RfqEntry> targetRfqs = quotingMode ?
+                eligibleRfqs :
+                Optional.ofNullable(getRandomFromList(eligibleRfqs)).map(List::of).orElse(Collections.emptyList());
         if (CollectionUtils.isEmpty(targetRfqs)) {
             logger.trace("No eligible RFQ for creating offer");
             return CompletableFuture.completedFuture(null);
@@ -727,12 +738,15 @@ public class BotEngine extends StompSessionHandlerAdapter {
 
     private CompletableFuture<Void> updateOffer() {
         List<Pair<RfqEntry, OfferEntry>> editableOffers = getEditableOffers();
-        if (CollectionUtils.isEmpty(editableOffers)) {
+        List<Pair<RfqEntry, OfferEntry>> targetOffers = quotingMode ?
+                editableOffers :
+                Optional.ofNullable(getRandomFromList(editableOffers)).map(List::of).orElse(Collections.emptyList());
+        if (CollectionUtils.isEmpty(targetOffers)) {
             logger.trace("No eligible offer to update");
             return CompletableFuture.completedFuture(null);
         }
         List<CompletableFuture<Void>> futures = new ArrayList<>();
-        for (Pair<RfqEntry, OfferEntry> pair : editableOffers) {
+        for (Pair<RfqEntry, OfferEntry> pair : targetOffers) {
             RfqEntry targetRfq = pair.getLeft();
             OfferEntry targetOffer = pair.getRight();
             if (toss(tossModifyOfferUpdate)) {
@@ -985,10 +999,7 @@ public class BotEngine extends StompSessionHandlerAdapter {
                                 .anyMatch(offerEntryPredicate)
                 )
                 .toList();
-        List<RfqEntry> targetRfqs = singleItemPerAction ?
-                Optional.ofNullable(getRandomFromList(eligibleRfqs)).map(List::of).orElse(Collections.emptyList()) :
-                eligibleRfqs;
-        return targetRfqs.stream()
+        return eligibleRfqs.stream()
                 .map(rfq -> Pair.of(rfq, rfq.getOffers().get(0)))
                 .toList();
     }
