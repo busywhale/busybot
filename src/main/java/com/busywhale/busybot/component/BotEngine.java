@@ -822,7 +822,7 @@ public class BotEngine extends StompSessionHandlerAdapter {
                 double offerPrice = targetOffer.getOffer().getBidPx().doubleValue();
                 if (offerPrice < myPrice) {
                     // price is too low to accept
-                    logger.trace("Offer price is too low to accept: offerPrice={}, offerSide={}, baseAsset={}, quoteAsset={}, reference={}, myPrice={}",
+                    logger.debug("Offer price is too low to accept: offerPrice={}, offerSide={}, baseAsset={}, quoteAsset={}, reference={}, myPrice={}",
                             offerPrice, offerSide, targetRfq.getBaseAsset(), targetRfq.getQuoteAsset(), reference, myPrice);
                     return CompletableFuture.completedFuture(null);
                 }
@@ -832,7 +832,7 @@ public class BotEngine extends StompSessionHandlerAdapter {
                 double offerPrice = targetOffer.getOffer().getAskPx().doubleValue();
                 if (offerPrice > myPrice) {
                     // price is too high to accept
-                    logger.trace("Offer price is too high to accept: offerPrice={}, offerSide={}, baseAsset={}, quoteAsset={}, reference={}, myPrice={}",
+                    logger.debug("Offer price is too high to accept: offerPrice={}, offerSide={}, baseAsset={}, quoteAsset={}, reference={}, myPrice={}",
                             offerPrice, offerSide, targetRfq.getBaseAsset(), targetRfq.getQuoteAsset(), reference, myPrice);
                     return CompletableFuture.completedFuture(null);
                 }
@@ -976,7 +976,7 @@ public class BotEngine extends StompSessionHandlerAdapter {
                 double counterOfferPrice = targetOffer.getCounter().getBidPx().doubleValue();
                 if (counterOfferPrice < myPrice) {
                     // price is too low to accept
-                    logger.trace("Counter-offer price is too low to accept: counterOfferPrice={}, counterOfferSide={}, baseAsset={}, quoteAsset={}, reference={}, myPrice={}",
+                    logger.debug("Counter-offer price is too low to accept: counterOfferPrice={}, counterOfferSide={}, baseAsset={}, quoteAsset={}, reference={}, myPrice={}",
                             counterOfferPrice, counterOfferSide, targetRfq.getBaseAsset(), targetRfq.getQuoteAsset(), reference, myPrice);
                     return CompletableFuture.completedFuture(null);
                 }
@@ -986,7 +986,7 @@ public class BotEngine extends StompSessionHandlerAdapter {
                 double counterOfferPrice = targetOffer.getCounter().getAskPx().doubleValue();
                 if (counterOfferPrice > myPrice) {
                     // price is too high to accept
-                    logger.trace("Counter-offer price is too high to accept: counterOfferPrice={}, counterOfferSide={}, baseAsset={}, quoteAsset={}, reference={}, myPrice={}",
+                    logger.debug("Counter-offer price is too high to accept: counterOfferPrice={}, counterOfferSide={}, baseAsset={}, quoteAsset={}, reference={}, myPrice={}",
                             counterOfferPrice, counterOfferSide, targetRfq.getBaseAsset(), targetRfq.getQuoteAsset(), reference, myPrice);
                     return CompletableFuture.completedFuture(null);
                 }
