@@ -798,15 +798,45 @@ public class BotEngine extends StompSessionHandlerAdapter {
         RfqEntry targetRfq = pair.getLeft();
         OfferEntry targetOffer = pair.getRight();
         if (toss(tossAnswerOfferAccept)) {
-            Side acceptingSide;
+            Side offerSide;
             if (targetOffer.getOffer().getBidQty() != null && targetOffer.getOffer().getAskQty() != null) {
-                acceptingSide = getRandomSide(false);
+                offerSide = getRandomSide(false);
             } else if (targetOffer.getOffer().getBidQty() != null) {
-                acceptingSide = Side.SELL;
+                offerSide = Side.BUY;
             } else if (targetOffer.getOffer().getAskQty() != null) {
-                acceptingSide = Side.BUY;
+                offerSide = Side.SELL;
             } else {
                 return CompletableFuture.completedFuture(null);
+            }
+
+            double reference = getReferencePrice(targetRfq.getBaseAsset(), targetRfq.getQuoteAsset());
+            if (reference == 0.0) {
+                logger.warn("No reference price for answering offer: baseAsset={}, quoteAsset={}", targetRfq.getBaseAsset(), targetRfq.getQuoteAsset());
+                return CompletableFuture.completedFuture(null);
+            }
+            double myPrice = getRandomPrice(reference, marketWidth, offerSide);
+            double acceptingQty;
+            Side acceptingSide;
+            if (offerSide == Side.BUY) {
+                acceptingSide = Side.SELL;
+                double offerPrice = targetOffer.getOffer().getBidPx().doubleValue();
+                if (offerPrice < myPrice) {
+                    // price is too low to accept
+                    logger.trace("Offer price is too low to accept: offerPrice={}, offerSide={}, baseAsset={}, quoteAsset={}, reference={}, myPrice={}",
+                            offerPrice, offerSide, targetRfq.getBaseAsset(), targetRfq.getQuoteAsset(), reference, myPrice);
+                    return CompletableFuture.completedFuture(null);
+                }
+                acceptingQty = getRandomQty(targetOffer.getOffer().getBidQty().doubleValue());
+            } else {
+                acceptingSide = Side.BUY;
+                double offerPrice = targetOffer.getOffer().getAskPx().doubleValue();
+                if (offerPrice > myPrice) {
+                    // price is too high to accept
+                    logger.trace("Offer price is too high to accept: offerPrice={}, offerSide={}, baseAsset={}, quoteAsset={}, reference={}, myPrice={}",
+                            offerPrice, offerSide, targetRfq.getBaseAsset(), targetRfq.getQuoteAsset(), reference, myPrice);
+                    return CompletableFuture.completedFuture(null);
+                }
+                acceptingQty = getRandomQty(targetOffer.getOffer().getAskQty().doubleValue());
             }
 
             return apiEngine.acceptOffer(
@@ -814,10 +844,7 @@ public class BotEngine extends StompSessionHandlerAdapter {
                     targetOffer.getId(),
                     targetOffer.getOffer().getNonce(),
                     acceptingSide,
-                    getRandomQty(acceptingSide == Side.SELL ?
-                            targetOffer.getOffer().getBidQty().doubleValue() :
-                            targetOffer.getOffer().getAskQty().doubleValue()
-                    )
+                    acceptingQty
             );
         } else {
             return apiEngine.rejectOffer(
@@ -925,25 +952,53 @@ public class BotEngine extends StompSessionHandlerAdapter {
         RfqEntry targetRfq = pair.getLeft();
         OfferEntry targetOffer = pair.getRight();
         if (toss(tossAnswerCounterAccept)) {
-            Side acceptingSide;
+            Side counterOfferSide;
             if (targetOffer.getCounter().getBidQty() != null && targetOffer.getCounter().getAskQty() != null) {
-                acceptingSide = getRandomSide(false);
+                counterOfferSide = getRandomSide(false);
             } else if (targetOffer.getCounter().getBidQty() != null) {
-                acceptingSide = Side.SELL;
+                counterOfferSide = Side.BUY;
             } else if (targetOffer.getCounter().getAskQty() != null) {
-                acceptingSide = Side.BUY;
+                counterOfferSide = Side.SELL;
             } else {
                 return CompletableFuture.completedFuture(null);
             }
+
+            double reference = getReferencePrice(targetRfq.getBaseAsset(), targetRfq.getQuoteAsset());
+            if (reference == 0.0) {
+                logger.warn("No reference price for answering counter-offer: baseAsset={}, quoteAsset={}", targetRfq.getBaseAsset(), targetRfq.getQuoteAsset());
+                return CompletableFuture.completedFuture(null);
+            }
+            double myPrice = getRandomPrice(reference, marketWidth, counterOfferSide);
+            double acceptingQty;
+            Side acceptingSide;
+            if (counterOfferSide == Side.BUY) {
+                acceptingSide = Side.SELL;
+                double counterOfferPrice = targetOffer.getCounter().getBidPx().doubleValue();
+                if (counterOfferPrice < myPrice) {
+                    // price is too low to accept
+                    logger.trace("Counter-offer price is too low to accept: counterOfferPrice={}, counterOfferSide={}, baseAsset={}, quoteAsset={}, reference={}, myPrice={}",
+                            counterOfferPrice, counterOfferSide, targetRfq.getBaseAsset(), targetRfq.getQuoteAsset(), reference, myPrice);
+                    return CompletableFuture.completedFuture(null);
+                }
+                acceptingQty = getRandomQty(targetOffer.getCounter().getBidQty().doubleValue());
+            } else {
+                acceptingSide = Side.BUY;
+                double counterOfferPrice = targetOffer.getCounter().getAskPx().doubleValue();
+                if (counterOfferPrice > myPrice) {
+                    // price is too high to accept
+                    logger.trace("Counter-offer price is too high to accept: counterOfferPrice={}, counterOfferSide={}, baseAsset={}, quoteAsset={}, reference={}, myPrice={}",
+                            counterOfferPrice, counterOfferSide, targetRfq.getBaseAsset(), targetRfq.getQuoteAsset(), reference, myPrice);
+                    return CompletableFuture.completedFuture(null);
+                }
+                acceptingQty = getRandomQty(targetOffer.getCounter().getAskQty().doubleValue());
+            }
+
             return apiEngine.acceptCounter(
                     targetRfq.getId(),
                     targetOffer.getId(),
                     targetOffer.getCounter().getNonce(),
                     acceptingSide,
-                    getRandomQty(acceptingSide == Side.SELL ?
-                            targetOffer.getCounter().getBidQty().doubleValue() :
-                            targetOffer.getCounter().getAskQty().doubleValue()
-                    )
+                    acceptingQty
             );
         } else {
             return apiEngine.rejectCounter(
