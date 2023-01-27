@@ -16,6 +16,8 @@ public class BotUtils {
     private static final Random random = new Random(System.nanoTime());
     public static final int MIN_RFQ_TTL = 300;
     public static final int MIN_OFFER_TTL = 60;
+    private static final int MAX_PRICE_DP = 6;
+    private static final int MAX_QTY_DP = 2;
 
     public static <K, T> Map<K, T> convertToMap(List<T> offers, Function<T, K> keyFunc) {
         return ListUtils.emptyIfNull(offers)
@@ -45,12 +47,12 @@ public class BotUtils {
     public static double getRandomPrice(double reference, double width, Side side) {
         double maxRange = reference * width;
         double delta = getRandom(0.05, 1.0) * maxRange * (side == Side.BUY ? -1 : 1);
-        return Math.max(1 / Math.pow(10d, 2d), roundToNearest(reference + delta, 2));
+        return Math.max(1 / Math.pow(10d, MAX_PRICE_DP), roundToNearest(reference + delta, MAX_PRICE_DP));
     }
 
     public static double getRandomQty(Double bound) {
         double effectiveBound = bound != null ? bound : 10.0;
-        return Math.min(effectiveBound, Math.max(0.001, roundToNearest(getRandom(0.1, 1.0) * effectiveBound, 2)));
+        return Math.min(effectiveBound, Math.max(1 / Math.pow(10d, MAX_QTY_DP), roundToNearest(getRandom(0.5, 1.0) * effectiveBound, MAX_QTY_DP)));
     }
 
     public static <T> T getRandomFromList(List<T> list) {
