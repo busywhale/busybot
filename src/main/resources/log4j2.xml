@@ -10,6 +10,7 @@
                 filePattern="${sys:log.path:-logs}/busybot_%d{yyyyMMdd}.log.gz">
             <PatternLayout pattern="%d{yyyy-MM-dd HH:mm:ss.SSS} %-5p [%t] %c{1} - %m%n"/>
             <Policies>
+                <TimeBasedTriggeringPolicy />
                 <SizeBasedTriggeringPolicy size="100 MB"/>
             </Policies>
             <DefaultRolloverStrategy max="10">
