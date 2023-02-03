@@ -32,6 +32,8 @@ import java.util.function.Function;
 import java.util.stream.Collectors;
 import java.util.stream.StreamSupport;
 
+import static com.busywhale.busybot.util.BotUtils.SETTLEMENT_METHOD_OFF_CHAIN_IMMEDIATE;
+
 @Component
 public class ApiEngine {
     private static final Logger logger = LogManager.getLogger(ApiEngine.class);
@@ -269,7 +271,7 @@ public class ApiEngine {
                 .put("side", side.toString())
                 .put("ttl", ttl)
                 .put("qty", qty)
-                .put("settlementMethod", "OFF_CHAIN_IMMEDIATE")
+                .put("settlementMethod", SETTLEMENT_METHOD_OFF_CHAIN_IMMEDIATE)
                 .toString();
         return sendRequest(
                 "POST",

@@ -14,10 +14,17 @@ import java.util.stream.Collectors;
 
 public class BotUtils {
     private static final Random random = new Random(System.nanoTime());
+    public static final String SETTLEMENT_METHOD_OFF_CHAIN = "OFF_CHAIN";
+    public static final String SETTLEMENT_METHOD_OFF_CHAIN_IMMEDIATE = "OFF_CHAIN_IMMEDIATE";
+    public static final String SETTLEMENT_METHOD_ON_CHAIN_ERC20 = "ON_CHAIN_ERC20";
     public static final int MIN_RFQ_TTL = 300;
     public static final int MIN_OFFER_TTL = 60;
     private static final int MAX_PRICE_DP = 6;
     private static final int MAX_QTY_DP = 2;
+
+    public static boolean isOnChainSettlement(String settlementMethod) {
+        return SETTLEMENT_METHOD_ON_CHAIN_ERC20.equals(settlementMethod);
+    }
 
     public static <K, T> Map<K, T> convertToMap(List<T> offers, Function<T, K> keyFunc) {
         return ListUtils.emptyIfNull(offers)

@@ -1,6 +1,7 @@
 package com.busywhale.busybot.component;
 
 import com.busywhale.busybot.model.*;
+import com.busywhale.busybot.util.BotUtils;
 import com.busywhale.busybot.websocket.WebSocketMessage;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.DeserializationFeature;
@@ -635,9 +636,7 @@ public class BotEngine extends StompSessionHandlerAdapter {
     }
 
     private CompletableFuture<Void> createRfq() {
-        List<RfqEntry> myLiveRfqs = rfqMap.values().stream()
-                .filter(rfq -> rfq.getRequester() == null)
-                .toList();
+        List<RfqEntry> myLiveRfqs = getEligibleRfqs(true, false, null);
         if (myLiveRfqs.size() >= maxLiveRfqsPerUser) {
             logger.info("Not creating new RFQ as this would exceed max live RFQ count of {}: {} active, {} expired",
                     maxLiveRfqsPerUser,
@@ -696,18 +695,18 @@ public class BotEngine extends StompSessionHandlerAdapter {
         // - active
         // - with requester
         // - with no previous offers
-        List<RfqEntry> eligibleRfqs = rfqMap.values().stream()
-                .filter(rfq -> rfq.getStatus() == RfqStatus.ACTIVE &&
-                        rfq.getRequester() != null &&
-                        (enabledAssetsForOffer.contains(rfq.getBaseAsset()) || enabledAssetsForOffer.contains(rfq.getQuoteAsset())) &&
+        List<RfqEntry> eligibleRfqAds = getEligibleRfqs(
+                false,
+                true,
+                rfq -> (enabledAssetsForOffer.contains(rfq.getBaseAsset()) || enabledAssetsForOffer.contains(rfq.getQuoteAsset())) &&
+                        !BotUtils.isOnChainSettlement(rfq.getSettlementMethod()) &&
                         ListUtils.emptyIfNull(rfq.getOffers())
                                 .stream()
                                 .noneMatch(offerEntry -> offerEntry.getOfferor() == null)
-                )
-                .collect(Collectors.toList());
+        );
         List<RfqEntry> targetRfqs = quotingMode ?
-                eligibleRfqs :
-                Optional.ofNullable(getRandomFromList(eligibleRfqs)).map(List::of).orElse(Collections.emptyList());
+                eligibleRfqAds :
+                Optional.ofNullable(getRandomFromList(eligibleRfqAds)).map(List::of).orElse(Collections.emptyList());
         if (CollectionUtils.isEmpty(targetRfqs)) {
             logger.trace("No eligible RFQ for creating offer");
             return CompletableFuture.completedFuture(null);
@@ -866,15 +865,8 @@ public class BotEngine extends StompSessionHandlerAdapter {
                 o.getOffer() != null &&
                 o.getCounter() == null &&
                 o.getConfirm() == null;
-        List<RfqEntry> eligibleRfqs = rfqMap.values().stream()
-                .filter(rfq -> rfq.getRequester() == null &&
-                        CollectionUtils.isNotEmpty(rfq.getOffers()) &&
-                        rfq.getOffers()
-                                .stream()
-                                .anyMatch(offerEntryPredicate)
-                )
-                .collect(Collectors.toList());
-        RfqEntry targetRfq = getRandomFromList(eligibleRfqs);
+        List<RfqEntry> eligibleOwnRfqs = getEligibleRfqsWithOffers(true, false, offerEntryPredicate);
+        RfqEntry targetRfq = getRandomFromList(eligibleOwnRfqs);
         if (targetRfq == null) {
             logger.trace("No eligible RFQ for creating counter-offer");
             return CompletableFuture.completedFuture(null);
@@ -1028,11 +1020,11 @@ public class BotEngine extends StompSessionHandlerAdapter {
         // entries in rfqMap
         // - not done
         // - with no requester
-        return rfqMap.values().stream()
-                .filter(rfq -> rfq.getStatus() != RfqStatus.DONE &&
-                        rfq.getRequester() == null
-                )
-                .toList();
+        return getEligibleRfqs(
+                true,
+                false,
+                rfq -> rfq.getStatus() != RfqStatus.DONE
+        );
     }
 
     private List<Pair<RfqEntry, OfferEntry>> getEditableOffers() {
@@ -1045,16 +1037,8 @@ public class BotEngine extends StompSessionHandlerAdapter {
                 o.getOffer() != null &&
                 o.getOffer().getStatus() != OfferStatus.CONFIRMED &&
                 o.getOffer().getStatus() != OfferStatus.ENDED;
-        List<RfqEntry> eligibleRfqs = rfqMap.values().stream()
-                .filter(rfq -> rfq.getRequester() != null &&
-                        rfq.getStatus() == RfqStatus.ACTIVE &&  // update offers for active RFQs only
-                        CollectionUtils.isNotEmpty(rfq.getOffers()) &&
-                        rfq.getOffers()
-                                .stream()
-                                .anyMatch(offerEntryPredicate)
-                )
-                .toList();
-        return eligibleRfqs.stream()
+        List<RfqEntry> eligibleRfqAds = getEligibleRfqsWithOffers(false, true, offerEntryPredicate);
+        return eligibleRfqAds.stream()
                 .map(rfq -> Pair.of(rfq, rfq.getOffers().get(0)))
                 .toList();
     }
@@ -1068,15 +1052,9 @@ public class BotEngine extends StompSessionHandlerAdapter {
         Predicate<OfferEntry> offerEntryPredicate = o -> o.getOfferor() != null &&
                 o.getOffer() != null &&
                 o.getOffer().getStatus() == OfferStatus.ACTIVE;
-        List<RfqEntry> eligibleRfqs = rfqMap.values().stream()
-                .filter(rfq -> rfq.getRequester() == null &&
-                        CollectionUtils.isNotEmpty(rfq.getOffers()) &&
-                        rfq.getOffers()
-                                .stream()
-                                .anyMatch(offerEntryPredicate)
-                )
-                .collect(Collectors.toList());
-        RfqEntry targetRfq = getRandomFromList(eligibleRfqs);
+
+        List<RfqEntry> eligibleOwnRfqs = getEligibleRfqsWithOffers(true, false, offerEntryPredicate);
+        RfqEntry targetRfq = getRandomFromList(eligibleOwnRfqs);
         if (targetRfq == null) {
             return null;
         }
@@ -1102,15 +1080,8 @@ public class BotEngine extends StompSessionHandlerAdapter {
                 o.getCounter() != null &&
                 o.getCounter().getStatus() != OfferStatus.CONFIRMED &&
                 o.getCounter().getStatus() != OfferStatus.ENDED;
-        List<RfqEntry> eligibleRfqs = rfqMap.values().stream()
-                .filter(rfq -> rfq.getRequester() == null &&
-                        CollectionUtils.isNotEmpty(rfq.getOffers()) &&
-                        rfq.getOffers()
-                                .stream()
-                                .anyMatch(offerEntryPredicate)
-                )
-                .collect(Collectors.toList());
-        RfqEntry targetRfq = getRandomFromList(eligibleRfqs);
+        List<RfqEntry> eligibleOwnRfqs = getEligibleRfqsWithOffers(true, false, offerEntryPredicate);
+        RfqEntry targetRfq = getRandomFromList(eligibleOwnRfqs);
         if (targetRfq == null) {
             return null;
         }
@@ -1135,15 +1106,8 @@ public class BotEngine extends StompSessionHandlerAdapter {
                 o.getOffer() != null &&
                 o.getCounter() != null &&
                 o.getCounter().getStatus() == OfferStatus.ACTIVE;
-        List<RfqEntry> eligibleRfqs = rfqMap.values().stream()
-                .filter(rfq -> rfq.getRequester() != null &&
-                        CollectionUtils.isNotEmpty(rfq.getOffers()) &&
-                        rfq.getOffers()
-                                .stream()
-                                .anyMatch(offerEntryPredicate)
-                )
-                .collect(Collectors.toList());
-        RfqEntry targetRfq = getRandomFromList(eligibleRfqs);
+        List<RfqEntry> eligibleRfqAds = getEligibleRfqsWithOffers(false, false, offerEntryPredicate);
+        RfqEntry targetRfq = getRandomFromList(eligibleRfqAds);
         if (targetRfq == null) {
             return null;
         }
@@ -1165,5 +1129,25 @@ public class BotEngine extends StompSessionHandlerAdapter {
                 offerDetails.getStatus() == OfferStatus.ACTIVE &&
                 // in order to avoid cancelling expiring offers
                 offerDetails.getExpiryTime() - Instant.now().getEpochSecond() > 1;
+    }
+
+    private List<RfqEntry> getEligibleRfqs(boolean isOwn, boolean activeOnly, Predicate<RfqEntry> predicate) {
+        return rfqMap.values().stream()
+                .filter(rfq -> isOwn == (rfq.getRequester() == null) &&
+                        (!activeOnly || rfq.getStatus() == RfqStatus.ACTIVE) &&
+                        (predicate == null || predicate.test(rfq))
+                )
+                .toList();
+    }
+
+    private List<RfqEntry> getEligibleRfqsWithOffers(boolean isOwn, boolean activeOnly, Predicate<OfferEntry> offerEntryPredicate) {
+        return getEligibleRfqs(
+                isOwn,
+                activeOnly,
+                rfq -> CollectionUtils.isNotEmpty(rfq.getOffers()) &&
+                        rfq.getOffers()
+                                .stream()
+                                .anyMatch(offerEntryPredicate)
+        );
     }
 }

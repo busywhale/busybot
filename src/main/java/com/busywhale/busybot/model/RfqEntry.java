@@ -16,6 +16,7 @@ public class RfqEntry {
     private Long createTime;
     private UserDetails requester;
     private List<OfferEntry> offers;
+    private String settlementMethod;
 
     public String getId() {
         return id;
@@ -111,5 +112,13 @@ public class RfqEntry {
 
     public void setOffers(List<OfferEntry> offers) {
         this.offers = offers;
+    }
+
+    public String getSettlementMethod() {
+        return settlementMethod;
+    }
+
+    public void setSettlementMethod(String settlementMethod) {
+        this.settlementMethod = settlementMethod;
     }
 }
