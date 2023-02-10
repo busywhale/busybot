@@ -40,9 +40,9 @@ public class SpringConfiguration implements AsyncConfigurer {
     @Override
     public Executor getAsyncExecutor() {
         ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
-        executor.setCorePoolSize(0);
+        executor.setCorePoolSize(1);
         executor.setMaxPoolSize(Integer.MAX_VALUE);
-        executor.setQueueCapacity(Integer.MAX_VALUE);
+        executor.setQueueCapacity(0);
         executor.setThreadNamePrefix("worker-");
         executor.setWaitForTasksToCompleteOnShutdown(false);
         executor.initialize();
