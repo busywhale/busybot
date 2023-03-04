@@ -140,6 +140,9 @@ public class BotEngine extends StompSessionHandlerAdapter {
     @Value("#{'${ENABLED_ASSETS_FOR_OFFER:}'.split(',')}")
     private Set<String> enabledAssetsForOffer;
 
+    @Value("#{'${SUPPORTED_SETTLEMENT_METHODS:}'.split(',')}")
+    private Set<String> supportedSettlementMethods;
+
     @Value("${MAX_RANDOM_QTY_NOTIONAL:5000}")
     private double maxNotionalForRandomQty;
 
@@ -1133,7 +1136,8 @@ public class BotEngine extends StompSessionHandlerAdapter {
 
     private List<RfqEntry> getEligibleRfqs(boolean isOwn, boolean activeOnly, Predicate<RfqEntry> predicate) {
         return rfqMap.values().stream()
-                .filter(rfq -> isOwn == (rfq.getRequester() == null) &&
+                .filter(rfq -> supportedSettlementMethods.contains(rfq.getSettlementMethod()) &&
+                        isOwn == (rfq.getRequester() == null) &&
                         (!activeOnly || rfq.getStatus() == RfqStatus.ACTIVE) &&
                         (predicate == null || predicate.test(rfq))
                 )
