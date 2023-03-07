@@ -475,8 +475,13 @@ public class ApiEngine {
                     List<Asset> list = new ArrayList<>();
                     cryptoListNode.fieldNames()
                             .forEachRemaining(name -> {
-                                JsonNode isTradableNode = cryptoListNode.path(name).path("isTradable");
-                                if (!isTradableNode.isMissingNode() && isTradableNode.asBoolean()) {
+                                JsonNode tradableNode = cryptoListNode.path(name).path("meta").path("tradable");
+                                if (tradableNode.asBoolean()) {
+                                    list.add(new Asset(name, true));
+                                    return;
+                                }
+                                JsonNode oldTradableNode = cryptoListNode.path(name).path("isTradable");
+                                if (oldTradableNode.asBoolean()) {
                                     list.add(new Asset(name, true));
                                 }
                             });
