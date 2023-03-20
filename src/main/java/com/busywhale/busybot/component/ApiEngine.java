@@ -272,6 +272,7 @@ public class ApiEngine {
                 .put("ttl", ttl)
                 .put("qty", qty)
                 .put("settlementMethod", SETTLEMENT_METHOD_OFF_CHAIN_IMMEDIATE)
+                .put("settlementPeriod", 86400)
                 .toString();
         return sendRequest(
                 "POST",
