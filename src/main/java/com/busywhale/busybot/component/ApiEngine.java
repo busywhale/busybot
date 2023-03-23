@@ -9,6 +9,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.google.common.base.Splitter;
 import org.apache.commons.collections4.ListUtils;
 import org.apache.commons.lang3.StringUtils;
+import org.apache.commons.lang3.math.NumberUtils;
 import org.apache.http.HttpHeaders;
 import org.apache.http.HttpStatus;
 import org.apache.http.client.methods.CloseableHttpResponse;
@@ -185,7 +186,7 @@ public class ApiEngine {
         logger.info("Fetching settlements...");
         return sendRequest(
                 "GET",
-                "/api/v1/settlement",
+                "/api/v1/settlement/unsettled",
                 null,
                 true,
                 node -> {
@@ -271,6 +272,7 @@ public class ApiEngine {
                 .put("side", side.toString())
                 .put("ttl", ttl)
                 .put("qty", qty)
+                .put("minQty", qty / 2)
                 .put("settlementMethod", SETTLEMENT_METHOD_OFF_CHAIN_IMMEDIATE)
                 .put("settlementPeriod", 86400)
                 .toString();
@@ -314,7 +316,8 @@ public class ApiEngine {
     public CompletableFuture<Void> createOffer(String rfqId, int ttl, Double bidPx, Double bidQty, Double askPx, Double askQty) {
         logger.info("Creating offer: rfqId={}, ttl={}, bidPx={}, bidQty={}, askPx={}, askQty={}", rfqId, ttl, bidPx, bidQty, askPx, askQty);
         ObjectNode reqNode = mapper.createObjectNode()
-                .put("ttl", ttl);
+                .put("ttl", ttl)
+                .put("minQty", Math.min(Optional.ofNullable(bidQty).orElse(Double.MAX_VALUE), Optional.ofNullable(askQty).orElse(Double.MAX_VALUE)) / 2);
         Optional.ofNullable(bidPx).ifPresent(d -> reqNode.put("bidPx", d));
         Optional.ofNullable(bidQty).ifPresent(d -> reqNode.put("bidQty", d));
         Optional.ofNullable(askPx).ifPresent(d -> reqNode.put("askPx", d));
@@ -332,7 +335,8 @@ public class ApiEngine {
     public CompletableFuture<Void> updateOffer(String rfqId, String offerId, int offerNonce, int ttl, Double bidPx, Double bidQty, Double askPx, Double askQty) {
         logger.info("Updating offer: rfqId={}, offerId={}, offerNonce={}, ttl={}, bidPx={}, bidQty={}, askPx={}, askQty={}", rfqId, offerId, offerNonce, ttl, bidPx, bidQty, askPx, askQty);
         ObjectNode reqNode = mapper.createObjectNode()
-                .put("ttl", ttl);
+                .put("ttl", ttl)
+                .put("minQty", Math.min(Optional.ofNullable(bidQty).orElse(Double.MAX_VALUE), Optional.ofNullable(askQty).orElse(Double.MAX_VALUE)) / 2);
         Optional.ofNullable(bidPx).ifPresent(d -> reqNode.put("bidPx", d));
         Optional.ofNullable(bidQty).ifPresent(d -> reqNode.put("bidQty", d));
         Optional.ofNullable(askPx).ifPresent(d -> reqNode.put("askPx", d));
@@ -390,7 +394,8 @@ public class ApiEngine {
     public CompletableFuture<Void> createCounter(String rfqId, String offerId, int ttl, Double bidPx, Double bidQty, Double askPx, Double askQty) {
         logger.info("Creating counter-offer: rfqId={}, offerId={}, ttl={}, bidPx={}, bidQty={}, askPx={}, askQty={}", rfqId, offerId, ttl, bidPx, bidQty, askPx, askQty);
         ObjectNode reqNode = mapper.createObjectNode()
-                .put("ttl", ttl);
+                .put("ttl", ttl)
+                .put("minQty", Math.min(Optional.ofNullable(bidQty).orElse(Double.MAX_VALUE), Optional.ofNullable(askQty).orElse(Double.MAX_VALUE)) / 2);
         Optional.ofNullable(bidPx).ifPresent(d -> reqNode.put("bidPx", d));
         Optional.ofNullable(bidQty).ifPresent(d -> reqNode.put("bidQty", d));
         Optional.ofNullable(askPx).ifPresent(d -> reqNode.put("askPx", d));
@@ -408,7 +413,8 @@ public class ApiEngine {
     public CompletableFuture<Void> updateCounter(String rfqId, String offerId, int counterNonce, int ttl, Double bidPx, Double bidQty, Double askPx, Double askQty) {
         logger.info("Updating counter-offer: rfqId={}, offerId={}, counterNonce={}, ttl={}, bidPx={}, bidQty={}, askPx={}, askQty={}", rfqId, offerId, counterNonce, ttl, bidPx, bidQty, askPx, askQty);
         ObjectNode reqNode = mapper.createObjectNode()
-                .put("ttl", ttl);
+                .put("ttl", ttl)
+                .put("minQty", Math.min(Optional.ofNullable(bidQty).orElse(Double.MAX_VALUE), Optional.ofNullable(askQty).orElse(Double.MAX_VALUE)) / 2);
         Optional.ofNullable(bidPx).ifPresent(d -> reqNode.put("bidPx", d));
         Optional.ofNullable(bidQty).ifPresent(d -> reqNode.put("bidQty", d));
         Optional.ofNullable(askPx).ifPresent(d -> reqNode.put("askPx", d));
