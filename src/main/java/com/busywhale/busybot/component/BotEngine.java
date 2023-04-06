@@ -152,6 +152,9 @@ public class BotEngine extends StompSessionHandlerAdapter {
     @Value("${DEBUG_PRINT_INDEX_SNAPSHOT:false}")
     private boolean printIndexSnapshot;
 
+    @Value("${DEFAULT_PRICES:{}}")
+    private String defaultPrices;
+
     private boolean isShuttingDown = false;
     private boolean isConnected = false;
     private boolean isRfqAdSnapshotReady = false;
@@ -327,6 +330,7 @@ public class BotEngine extends StompSessionHandlerAdapter {
 
     private void initData() {
         loadFiatRates();
+        loadDefaultPrices();
         try {
             CompletableFuture.allOf(
                     apiEngine.getAssets()
@@ -357,6 +361,18 @@ public class BotEngine extends StompSessionHandlerAdapter {
             indexes.putIfAbsent(PIVOT_CURRENCY, 1.0);
         } catch (Exception e) {
             logger.error("Failed to load fiat rates from external source", e);
+        }
+    }
+
+    private void loadDefaultPrices() {
+        try {
+            JsonNode node = mapper.readTree(defaultPrices);
+            node.fields().forEachRemaining(e -> {
+                logger.info("Loaded default price for {}: {}", e.getKey(), e.getValue().asDouble());
+                indexes.putIfAbsent(e.getKey(), e.getValue().asDouble());
+            });
+        } catch (Exception e) {
+            logger.error("Failed to parse default prices");
         }
     }
 
