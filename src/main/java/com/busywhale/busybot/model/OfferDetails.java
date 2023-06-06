@@ -13,6 +13,7 @@ public class OfferDetails {
     private Long expiryTime;
     private Long updateTime;
     private Long createTime;
+    private BigDecimal minQty;
 
     public BigDecimal getBidPx() {
         return bidPx;
@@ -92,5 +93,13 @@ public class OfferDetails {
 
     public void setCreateTime(Long createTime) {
         this.createTime = createTime;
+    }
+
+    public BigDecimal getMinQty() {
+        return minQty;
+    }
+
+    public void setMinQty(BigDecimal minQty) {
+        this.minQty = minQty;
     }
 }

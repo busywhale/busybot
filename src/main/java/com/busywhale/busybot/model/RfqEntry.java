@@ -17,6 +17,7 @@ public class RfqEntry {
     private UserDetails requester;
     private List<OfferEntry> offers;
     private String settlementMethod;
+    private BigDecimal minQty;
 
     public String getId() {
         return id;
@@ -120,5 +121,13 @@ public class RfqEntry {
 
     public void setSettlementMethod(String settlementMethod) {
         this.settlementMethod = settlementMethod;
+    }
+
+    public BigDecimal getMinQty() {
+        return minQty;
+    }
+
+    public void setMinQty(BigDecimal minQty) {
+        this.minQty = minQty;
     }
 }

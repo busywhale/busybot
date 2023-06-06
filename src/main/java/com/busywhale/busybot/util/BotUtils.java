@@ -3,7 +3,6 @@ package com.busywhale.busybot.util;
 import com.busywhale.busybot.model.Asset;
 import com.busywhale.busybot.model.Side;
 import org.apache.commons.collections4.ListUtils;
-import org.springframework.lang.NonNull;
 import org.springframework.util.CollectionUtils;
 
 import java.util.List;
@@ -14,7 +13,9 @@ import java.util.stream.Collectors;
 
 public class BotUtils {
     private static final Random random = new Random(System.nanoTime());
+//    private static final MathContext PRECISION = new MathContext(9, RoundingMode.HALF_UP);
     public static final String SETTLEMENT_METHOD_OFF_CHAIN = "OFF_CHAIN";
+
     public static final String SETTLEMENT_METHOD_OFF_CHAIN_IMMEDIATE = "OFF_CHAIN_IMMEDIATE";
     public static final String SETTLEMENT_METHOD_ON_CHAIN_ERC20 = "ON_CHAIN_ERC20";
     public static final int MIN_RFQ_TTL = 300;
@@ -57,9 +58,8 @@ public class BotUtils {
         return Math.max(1 / Math.pow(10d, MAX_PRICE_DP), roundToNearest(reference + delta, MAX_PRICE_DP));
     }
 
-    public static double getRandomQty(Double bound) {
-        double effectiveBound = bound != null ? bound : 10.0;
-        return Math.min(effectiveBound, Math.max(1 / Math.pow(10d, MAX_QTY_DP), roundToNearest(getRandom(0.5, 1.0) * effectiveBound, MAX_QTY_DP)));
+    public static double getRandomQty(double min, double max) {
+        return Math.min(max, Math.max(Math.max(min, 1 / Math.pow(10d, MAX_QTY_DP)), roundToNearest(getRandom(min, max), MAX_QTY_DP)));
     }
 
     public static <T> T getRandomFromList(List<T> list) {
@@ -78,10 +78,12 @@ public class BotUtils {
         return target > random.nextDouble();
     }
 
-    private static double getRandom(double min, double max) {
-        if (max <= min) {
-            return random.nextDouble();
-        }
-        return random.nextDouble() * (max - min) + min;
+//    public static double fixDecimal(double d) {
+//        return BigDecimal.valueOf(d).multiply(BigDecimal.ONE, PRECISION).doubleValue();
+//    }
+
+    private static double getRandom(double from, double to) {
+        double min = Math.min(from, to);
+        return random.nextDouble() * Math.abs(to - from) + min;
     }
 }

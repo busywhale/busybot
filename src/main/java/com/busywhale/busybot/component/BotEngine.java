@@ -674,7 +674,7 @@ public class BotEngine extends StompSessionHandlerAdapter {
                 .filter(i -> i > 0)
                 .map(i -> maxNotionalForRandomQty / i)
                 .orElse(maxNotionalForRandomQty);
-        double qty = getRandomQty(qtyBound);
+        double qty = getRandomQty(0, qtyBound);
 
         return apiEngine.createRfq(
                 baseAsset,
@@ -746,9 +746,9 @@ public class BotEngine extends StompSessionHandlerAdapter {
                     targetRfq.getId(),
                     getSuggestedTtl(true, useMinTtl),
                     offerSide != Side.SELL ? getRandomPrice(reference, marketWidth, Side.BUY) : null,
-                    offerSide != Side.SELL ? getRandomQty(targetRfq.getQty().doubleValue()) : null,
+                    offerSide != Side.SELL ? getRandomQty(targetRfq.getMinQty().doubleValue(), targetRfq.getQty().doubleValue()) : null,
                     offerSide != Side.BUY ? getRandomPrice(reference, marketWidth, Side.SELL) : null,
-                    offerSide != Side.BUY ? getRandomQty(targetRfq.getQty().doubleValue()) : null
+                    offerSide != Side.BUY ? getRandomQty(targetRfq.getMinQty().doubleValue(), targetRfq.getQty().doubleValue()) : null
             ));
         }
         return CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]));
@@ -786,9 +786,9 @@ public class BotEngine extends StompSessionHandlerAdapter {
                             targetOffer.getOffer().getNonce(),
                             getSuggestedTtl(true, useMinTtl),
                             offerSide != Side.SELL ? getRandomPrice(reference, marketWidth, Side.BUY) : null,
-                            offerSide != Side.SELL ? getRandomQty(targetRfq.getQty().doubleValue()) : null,
+                            offerSide != Side.SELL ? getRandomQty(targetRfq.getMinQty().doubleValue(), targetRfq.getQty().doubleValue()) : null,
                             offerSide != Side.BUY ? getRandomPrice(reference, marketWidth, Side.SELL) : null,
-                            offerSide != Side.BUY ? getRandomQty(targetRfq.getQty().doubleValue()) : null
+                            offerSide != Side.BUY ? getRandomQty(targetRfq.getMinQty().doubleValue(), targetRfq.getQty().doubleValue()) : null
                     ));
                     continue;
                 }
@@ -844,7 +844,7 @@ public class BotEngine extends StompSessionHandlerAdapter {
                             offerPrice, offerSide, targetRfq.getBaseAsset(), targetRfq.getQuoteAsset(), reference, myPrice);
                     return CompletableFuture.completedFuture(null);
                 }
-                acceptingQty = getRandomQty(targetOffer.getOffer().getBidQty().doubleValue());
+                acceptingQty = getRandomQty(targetOffer.getOffer().getMinQty().doubleValue(), targetOffer.getOffer().getBidQty().doubleValue());
             } else {
                 acceptingSide = Side.BUY;
                 double offerPrice = targetOffer.getOffer().getAskPx().doubleValue();
@@ -854,7 +854,7 @@ public class BotEngine extends StompSessionHandlerAdapter {
                             offerPrice, offerSide, targetRfq.getBaseAsset(), targetRfq.getQuoteAsset(), reference, myPrice);
                     return CompletableFuture.completedFuture(null);
                 }
-                acceptingQty = getRandomQty(targetOffer.getOffer().getAskQty().doubleValue());
+                acceptingQty = getRandomQty(targetOffer.getOffer().getMinQty().doubleValue(), targetOffer.getOffer().getAskQty().doubleValue());
             }
 
             return apiEngine.acceptOffer(
@@ -909,9 +909,9 @@ public class BotEngine extends StompSessionHandlerAdapter {
                 targetOffer.getId(),
                 getSuggestedTtl(true, useMinTtl),
                 targetOffer.getOffer().getAskPx() != null ? getRandomPrice(reference, marketWidth, Side.BUY) : null,
-                targetOffer.getOffer().getAskQty() != null ? getRandomQty(targetOffer.getOffer().getAskQty().doubleValue()) : null,
+                targetOffer.getOffer().getAskQty() != null ? getRandomQty(targetRfq.getMinQty().doubleValue(), targetOffer.getOffer().getAskQty().doubleValue()) : null,
                 targetOffer.getOffer().getBidPx() != null ? getRandomPrice(reference, marketWidth, Side.SELL) : null,
-                targetOffer.getOffer().getBidQty() != null ? getRandomQty(targetOffer.getOffer().getBidQty().doubleValue()) : null
+                targetOffer.getOffer().getBidQty() != null ? getRandomQty(targetRfq.getMinQty().doubleValue(), targetOffer.getOffer().getBidQty().doubleValue()) : null
         );
     }
 
@@ -936,9 +936,9 @@ public class BotEngine extends StompSessionHandlerAdapter {
                         targetOffer.getCounter().getNonce(),
                         getSuggestedTtl(true, useMinTtl),
                         targetOffer.getOffer().getAskPx() != null ? getRandomPrice(reference, marketWidth, Side.BUY) : null,
-                        targetOffer.getOffer().getAskQty() != null ? getRandomQty(targetOffer.getOffer().getAskQty().doubleValue()) : null,
+                        targetOffer.getOffer().getAskQty() != null ? getRandomQty(targetRfq.getMinQty().doubleValue(), targetOffer.getOffer().getAskQty().doubleValue()) : null,
                         targetOffer.getOffer().getBidPx() != null ? getRandomPrice(reference, marketWidth, Side.SELL) : null,
-                        targetOffer.getOffer().getBidQty() != null ? getRandomQty(targetOffer.getOffer().getBidQty().doubleValue()) : null
+                        targetOffer.getOffer().getBidQty() != null ? getRandomQty(targetRfq.getMinQty().doubleValue(), targetOffer.getOffer().getBidQty().doubleValue()) : null
                 );
             }
             return CompletableFuture.completedFuture(null);
@@ -991,7 +991,7 @@ public class BotEngine extends StompSessionHandlerAdapter {
                             counterOfferPrice, counterOfferSide, targetRfq.getBaseAsset(), targetRfq.getQuoteAsset(), reference, myPrice);
                     return CompletableFuture.completedFuture(null);
                 }
-                acceptingQty = getRandomQty(targetOffer.getCounter().getBidQty().doubleValue());
+                acceptingQty = getRandomQty(targetOffer.getCounter().getMinQty().doubleValue(), targetOffer.getCounter().getBidQty().doubleValue());
             } else {
                 acceptingSide = Side.BUY;
                 double counterOfferPrice = targetOffer.getCounter().getAskPx().doubleValue();
@@ -1001,7 +1001,7 @@ public class BotEngine extends StompSessionHandlerAdapter {
                             counterOfferPrice, counterOfferSide, targetRfq.getBaseAsset(), targetRfq.getQuoteAsset(), reference, myPrice);
                     return CompletableFuture.completedFuture(null);
                 }
-                acceptingQty = getRandomQty(targetOffer.getCounter().getAskQty().doubleValue());
+                acceptingQty = getRandomQty(targetOffer.getCounter().getMinQty().doubleValue(), targetOffer.getCounter().getAskQty().doubleValue());
             }
 
             return apiEngine.acceptCounter(
