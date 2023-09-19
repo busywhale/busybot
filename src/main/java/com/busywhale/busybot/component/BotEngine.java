@@ -51,7 +51,7 @@ public class BotEngine extends StompSessionHandlerAdapter {
     private static final Logger logger = LogManager.getLogger(BotEngine.class);
     private static final int TIMEOUT = 5;
     private static final String INDEX_SNAPSHOTS_DESTINATION = "/topic/public/indexes";
-    private static final String RFQ_ADS_DESTINATION = "/user/queue/rfq/ads";
+    private static final String RFQ_POST_DESTINATION = "/user/queue/rfq/post";
     private static final String MY_RFQ_DESTINATION = "/user/queue/rfq/my";
     private static final String POSITION_DESTINATION = "/user/queue/position";
     private static final String SETTLEMENT_DESTINATION = "/user/queue/settlement";
@@ -157,9 +157,9 @@ public class BotEngine extends StompSessionHandlerAdapter {
 
     private boolean isShuttingDown = false;
     private boolean isConnected = false;
-    private boolean isRfqAdSnapshotReady = false;
+    private boolean isRfqPostSnapshotReady = false;
     private boolean isMyRfqSnapshotReady = false;
-    private final List<String> pendingRfqAdPayloads = new ArrayList<>();
+    private final List<String> pendingRfqPostPayloads = new ArrayList<>();
     private final List<String> pendingMyRfqPayloads = new ArrayList<>();
 
     @PostConstruct
@@ -222,13 +222,13 @@ public class BotEngine extends StompSessionHandlerAdapter {
         logger.info("New WebSocket session established: {}, headers={}", session.getSessionId(), connectedHeaders);
         isConnected = true;
         session.subscribe(INDEX_SNAPSHOTS_DESTINATION, this);
-        session.subscribe(RFQ_ADS_DESTINATION, this);
+        session.subscribe(RFQ_POST_DESTINATION, this);
         session.subscribe(MY_RFQ_DESTINATION, this);
         session.subscribe(POSITION_DESTINATION, this);
         session.subscribe(SETTLEMENT_DESTINATION, this);
 
         loadMyRfqs();
-        loadRfqAds();
+        loadRfqPosts();
         loadPositions();
         loadSettlements();
     }
@@ -264,11 +264,11 @@ public class BotEngine extends StompSessionHandlerAdapter {
                 case INDEX_SNAPSHOTS_DESTINATION:
                     handleIndexSnapshotFeed(message.message());
                     break;
-                case RFQ_ADS_DESTINATION:
-                    if (!isRfqAdSnapshotReady) {
-                        pendingRfqAdPayloads.add(message.message());
+                case RFQ_POST_DESTINATION:
+                    if (!isRfqPostSnapshotReady) {
+                        pendingRfqPostPayloads.add(message.message());
                     } else {
-                        handleRfqAdsFeed(message.message());
+                        handleRfqPostFeed(message.message());
                     }
                     break;
                 case MY_RFQ_DESTINATION:
@@ -419,20 +419,20 @@ public class BotEngine extends StompSessionHandlerAdapter {
         }
     }
 
-    private void loadRfqAds() {
+    private void loadRfqPosts() {
         try {
-            logger.info("Loading RFQ ads...");
-            apiEngine.getRfqAds()
+            logger.info("Loading RFQ posts...");
+            apiEngine.getRfqPosts()
                     .thenAccept(list -> {
-                        logger.info("Received {} RFQ ads", list.size());
-                        list.forEach(this::handleRfqAd);
-                        while (!pendingRfqAdPayloads.isEmpty()) {
-                            handleRfqAdsFeed(pendingRfqAdPayloads.remove(0));
+                        logger.info("Received {} RFQ posts", list.size());
+                        list.forEach(this::handleRfqPost);
+                        while (!pendingRfqPostPayloads.isEmpty()) {
+                            handleRfqPostFeed(pendingRfqPostPayloads.remove(0));
                         }
-                        isRfqAdSnapshotReady = true;
+                        isRfqPostSnapshotReady = true;
                     });
         } catch (Exception e) {
-            logger.error("Failed to load RFQ ads", e);
+            logger.error("Failed to load RFQ posts", e);
         }
     }
 
@@ -467,21 +467,21 @@ public class BotEngine extends StompSessionHandlerAdapter {
         }
     }
 
-    private void handleRfqAdsFeed(String payload) {
-        logger.debug("Received RFQ ad feed: {}", payload);
+    private void handleRfqPostFeed(String payload) {
+        logger.debug("Received RFQ post feed: {}", payload);
         try {
             JsonNode node = mapper.readTree(payload);
             String event = node.get("event").asText();
 
-            if ("EVENT_RFQ_ADS_UPDATE".equals(event)) {
+            if ("EVENT_RFQ_POST_UPDATE".equals(event)) {
                 JsonNode rfqNode = node.path("rfq");
                 if (!rfqNode.isMissingNode()) {
                     RfqEntry rfqEntry = mapper.treeToValue(rfqNode, RfqEntry.class);
-                    handleRfqAd(rfqEntry);
+                    handleRfqPost(rfqEntry);
                 }
             }
         } catch (IOException e) {
-            logger.error("Failed to parse RFQ ads data", e);
+            logger.error("Failed to parse RFQ post data", e);
         }
     }
 
@@ -540,7 +540,7 @@ public class BotEngine extends StompSessionHandlerAdapter {
         }
     }
 
-    private void handleRfqAd(RfqEntry rfqEntry) {
+    private void handleRfqPost(RfqEntry rfqEntry) {
         String rfqId = rfqEntry.getId();
         if (rfqEntry.getStatus() == RfqStatus.DONE) {
             rfqMap.remove(rfqId);
@@ -714,7 +714,7 @@ public class BotEngine extends StompSessionHandlerAdapter {
         // - active
         // - with requester
         // - with no previous offers
-        List<RfqEntry> eligibleRfqAds = getEligibleRfqs(
+        List<RfqEntry> eligibleRfqPosts = getEligibleRfqs(
                 false,
                 true,
                 rfq -> (enabledAssetsForOffer.contains(rfq.getBaseAsset()) || enabledAssetsForOffer.contains(rfq.getQuoteAsset())) &&
@@ -724,8 +724,8 @@ public class BotEngine extends StompSessionHandlerAdapter {
                                 .noneMatch(offerEntry -> offerEntry.getOfferor() == null)
         );
         List<RfqEntry> targetRfqs = quotingMode ?
-                eligibleRfqAds :
-                Optional.ofNullable(getRandomFromList(eligibleRfqAds)).map(List::of).orElse(Collections.emptyList());
+                eligibleRfqPosts :
+                Optional.ofNullable(getRandomFromList(eligibleRfqPosts)).map(List::of).orElse(Collections.emptyList());
         if (CollectionUtils.isEmpty(targetRfqs)) {
             logger.trace("No eligible RFQ for creating offer");
             return CompletableFuture.completedFuture(null);
@@ -1056,8 +1056,8 @@ public class BotEngine extends StompSessionHandlerAdapter {
                 o.getOffer() != null &&
                 o.getOffer().getStatus() != OfferStatus.CONFIRMED &&
                 o.getOffer().getStatus() != OfferStatus.ENDED;
-        List<RfqEntry> eligibleRfqAds = getEligibleRfqsWithOffers(false, true, offerEntryPredicate);
-        return eligibleRfqAds.stream()
+        List<RfqEntry> eligibleRfqPosts = getEligibleRfqsWithOffers(false, true, offerEntryPredicate);
+        return eligibleRfqPosts.stream()
                 .map(rfq -> Pair.of(rfq, rfq.getOffers().get(0)))
                 .toList();
     }
@@ -1125,8 +1125,8 @@ public class BotEngine extends StompSessionHandlerAdapter {
                 o.getOffer() != null &&
                 o.getCounter() != null &&
                 o.getCounter().getStatus() == OfferStatus.ACTIVE;
-        List<RfqEntry> eligibleRfqAds = getEligibleRfqsWithOffers(false, false, offerEntryPredicate);
-        RfqEntry targetRfq = getRandomFromList(eligibleRfqAds);
+        List<RfqEntry> eligibleRfqPosts = getEligibleRfqsWithOffers(false, false, offerEntryPredicate);
+        RfqEntry targetRfq = getRandomFromList(eligibleRfqPosts);
         if (targetRfq == null) {
             return null;
         }

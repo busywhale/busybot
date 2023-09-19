@@ -9,7 +9,6 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.google.common.base.Splitter;
 import org.apache.commons.collections4.ListUtils;
 import org.apache.commons.lang3.StringUtils;
-import org.apache.commons.lang3.math.NumberUtils;
 import org.apache.http.HttpHeaders;
 import org.apache.http.HttpStatus;
 import org.apache.http.client.methods.CloseableHttpResponse;
@@ -98,11 +97,11 @@ public class ApiEngine {
     }
 
     @Async
-    public CompletableFuture<List<RfqEntry>> getRfqAds() {
-        logger.info("Fetching RFQ ads...");
+    public CompletableFuture<List<RfqEntry>> getRfqPosts() {
+        logger.info("Fetching RFQ posts...");
         return sendRequest(
                 "GET",
-                "/api/v1/rfq-ads",
+                "/api/v1/rfq-posts",
                 null,
                 true,
                 node -> {
