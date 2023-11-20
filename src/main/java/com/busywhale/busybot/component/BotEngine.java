@@ -1,9 +1,9 @@
 package com.busywhale.busybot.component;
 
 import com.busywhale.busybot.model.*;
-import com.busywhale.busybot.util.BotUtils;
 import com.busywhale.busybot.websocket.WebSocketMessage;
 import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -13,6 +13,7 @@ import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import org.apache.commons.collections4.CollectionUtils;
 import org.apache.commons.collections4.ListUtils;
+import org.apache.commons.collections4.SetUtils;
 import org.apache.commons.io.IOUtils;
 import org.apache.commons.lang3.ObjectUtils;
 import org.apache.commons.lang3.StringUtils;
@@ -66,6 +67,13 @@ public class BotEngine extends StompSessionHandlerAdapter {
     private final Map<String, PositionEntry> positionMap = new ConcurrentHashMap<>();
     private final List<Triple<Supplier<CompletableFuture<Void>>, Double, String>> actions = new ArrayList<>();
 
+    private final List<String> pendingRfqPostPayloads = new ArrayList<>();
+    private final List<String> pendingMyRfqPayloads = new ArrayList<>();
+
+    private final Map<String, Set<String>> supportedSettlementAssetsMap;
+    private final Set<String> supportedSettlementMethods;
+    private final Map<String, Double> defaultPrices;
+
     @Autowired
     private ApiEngine apiEngine;
 
@@ -96,7 +104,7 @@ public class BotEngine extends StompSessionHandlerAdapter {
     @Value("${CHANCE_MODIFY_OFFER_UPDATE:0.5}")
     private double tossModifyOfferUpdate;
 
-    @Value("${CHANGE_ANSWER_OFFER:0.0}")
+    @Value("${CHANCE_ANSWER_OFFER:0.0}")
     private double tossAnswerOffer;
 
     @Value("${CHANCE_ANSWER_OFFER_ACCEPT:0.5}")
@@ -111,7 +119,7 @@ public class BotEngine extends StompSessionHandlerAdapter {
     @Value("${CHANCE_MODIFY_COUNTER_UPDATE:0.5}")
     private double tossModifyCounterUpdate;
 
-    @Value("${CHANGE_ANSWER_COUNTER:0.0}")
+    @Value("${CHANCE_ANSWER_COUNTER:0.0}")
     private double tossAnswerCounter;
 
     @Value("${CHANCE_ANSWER_COUNTER_ACCEPT:0.5}")
@@ -137,11 +145,6 @@ public class BotEngine extends StompSessionHandlerAdapter {
     @Value("${MARKET_WIDTH:0.002}")
     private double marketWidth;
 
-    @Value("#{'${ENABLED_ASSETS_FOR_OFFER:}'.split(',')}")
-    private Set<String> enabledAssetsForOffer;
-
-    @Value("#{'${SUPPORTED_SETTLEMENT_METHODS:}'.split(',')}")
-    private Set<String> supportedSettlementMethods;
 
     @Value("${MAX_RANDOM_QTY_NOTIONAL:5000}")
     private double maxNotionalForRandomQty;
@@ -152,18 +155,28 @@ public class BotEngine extends StompSessionHandlerAdapter {
     @Value("${DEBUG_PRINT_INDEX_SNAPSHOT:false}")
     private boolean printIndexSnapshot;
 
-    @Value("${DEFAULT_PRICES:{}}")
-    private String defaultPrices;
-
     private boolean isShuttingDown = false;
     private boolean isConnected = false;
     private boolean isRfqPostSnapshotReady = false;
     private boolean isMyRfqSnapshotReady = false;
-    private final List<String> pendingRfqPostPayloads = new ArrayList<>();
-    private final List<String> pendingMyRfqPayloads = new ArrayList<>();
+
+    public BotEngine(
+            @Value("${SUPPORTED_SETTLEMENT_ASSETS_MAP:{}}")
+            String supportedSettlementAssetsMapString,
+            @Value("${DEFAULT_PRICES:{}}")
+            String defaultPricesString
+    ) throws Exception {
+        supportedSettlementAssetsMap = mapper.readValue(supportedSettlementAssetsMapString, new TypeReference<>() {
+        });
+        supportedSettlementMethods = supportedSettlementAssetsMap.keySet();
+        defaultPrices = mapper.readValue(defaultPricesString, new TypeReference<>() {
+        });
+    }
 
     @PostConstruct
     public void postConstruct() {
+        logger.info("Supported assets: {}", supportedSettlementAssetsMap);
+
         initData();
         initActionList();
         initWebSocketConnection();
@@ -329,8 +342,11 @@ public class BotEngine extends StompSessionHandlerAdapter {
     }
 
     private void initData() {
+        defaultPrices.forEach((key, value) -> {
+            logger.info("Loaded default price for {}: {}", key, value);
+            indexes.putIfAbsent(key, value);
+        });
         loadFiatRates();
-        loadDefaultPrices();
         try {
             CompletableFuture.allOf(
                     apiEngine.getAssets()
@@ -361,18 +377,6 @@ public class BotEngine extends StompSessionHandlerAdapter {
             indexes.putIfAbsent(PIVOT_CURRENCY, 1.0);
         } catch (Exception e) {
             logger.error("Failed to load fiat rates from external source", e);
-        }
-    }
-
-    private void loadDefaultPrices() {
-        try {
-            JsonNode node = mapper.readTree(defaultPrices);
-            node.fields().forEachRemaining(e -> {
-                logger.info("Loaded default price for {}: {}", e.getKey(), e.getValue().asDouble());
-                indexes.putIfAbsent(e.getKey(), e.getValue().asDouble());
-            });
-        } catch (Exception e) {
-            logger.error("Failed to parse default prices");
         }
     }
 
@@ -665,8 +669,10 @@ public class BotEngine extends StompSessionHandlerAdapter {
             return CompletableFuture.completedFuture(null);
         }
 
-        String baseAsset = getRandomAsset(assets, true, null).symbol();
-        String quoteAsset = getRandomAsset(assets, true, baseAsset).symbol();
+        String settlementMethod = getRandomFromList(supportedSettlementMethods.stream().toList());
+        List<Asset> supportedAssets = assets.stream().filter(a -> SetUtils.emptyIfNull(supportedSettlementAssetsMap.get(settlementMethod)).contains(a.symbol())).toList();
+        String baseAsset = getRandomAsset(supportedAssets, true, null).symbol();
+        String quoteAsset = getRandomAsset(supportedAssets, true, baseAsset).symbol();
         Side side = getRandomSide(true);
         int ttl = getSuggestedTtl(false, useMinTtl);
         // qty capped at 5000 USDT
@@ -679,6 +685,7 @@ public class BotEngine extends StompSessionHandlerAdapter {
         return apiEngine.createRfq(
                 baseAsset,
                 quoteAsset,
+                settlementMethod,
                 side,
                 ttl,
                 qty
@@ -717,11 +724,15 @@ public class BotEngine extends StompSessionHandlerAdapter {
         List<RfqEntry> eligibleRfqPosts = getEligibleRfqs(
                 false,
                 true,
-                rfq -> (enabledAssetsForOffer.contains(rfq.getBaseAsset()) || enabledAssetsForOffer.contains(rfq.getQuoteAsset())) &&
-                        !BotUtils.isOnChainSettlement(rfq.getSettlementMethod()) &&
-                        ListUtils.emptyIfNull(rfq.getOffers())
-                                .stream()
-                                .noneMatch(offerEntry -> offerEntry.getOfferor() == null)
+                rfq -> {
+                    if (ListUtils.emptyIfNull(rfq.getOffers())
+                            .stream()
+                            .noneMatch(offerEntry -> offerEntry.getOfferor() == null)) {
+                        Set<String> settlementAssets = SetUtils.emptyIfNull(supportedSettlementAssetsMap.get(rfq.getSettlementMethod()));
+                        return settlementAssets.contains(rfq.getBaseAsset()) && settlementAssets.contains(rfq.getQuoteAsset());
+                    }
+                    return false;
+                }
         );
         List<RfqEntry> targetRfqs = quotingMode ?
                 eligibleRfqPosts :

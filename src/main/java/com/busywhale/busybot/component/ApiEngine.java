@@ -6,7 +6,6 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
-import com.google.common.base.Splitter;
 import org.apache.commons.collections4.ListUtils;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.http.HttpHeaders;
@@ -29,10 +28,7 @@ import java.io.IOException;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Function;
-import java.util.stream.Collectors;
 import java.util.stream.StreamSupport;
-
-import static com.busywhale.busybot.util.BotUtils.SETTLEMENT_METHOD_OFF_CHAIN_IMMEDIATE;
 
 @Component
 public class ApiEngine {
@@ -40,9 +36,6 @@ public class ApiEngine {
 
     @Value("${REST_URL_BASE}")
     private String apiUrlBase;
-
-    @Value("${ASSET_FILTER:}")
-    private String assetFilter;
 
     @Autowired
     private CloseableHttpClient httpClient;
@@ -57,23 +50,11 @@ public class ApiEngine {
     public CompletableFuture<List<Asset>> getAssets() {
         CompletableFuture<List<Asset>> cryptos = getCryptos();
         CompletableFuture<List<Asset>> fiats = getFiats();
-        Set<String> assetSet = StreamSupport.stream(
-                        Splitter.on(",")
-                                .trimResults()
-                                .omitEmptyStrings()
-                                .split(assetFilter)
-                                .spliterator(),
-                        false
-                )
-                .collect(Collectors.toSet());
         return CompletableFuture.allOf(cryptos, fiats)
-                .thenApply(dummy -> ListUtils.union(
-                                        ListUtils.emptyIfNull(cryptos.join()),
-                                        ListUtils.emptyIfNull(fiats.join())
-                                )
-                                .stream()
-                                .filter(asset -> assetSet.isEmpty() || assetSet.contains(asset.symbol()))
-                                .collect(Collectors.toList())
+                .thenApply(dummy -> new ArrayList<>(ListUtils.union(
+                                ListUtils.emptyIfNull(cryptos.join()),
+                                ListUtils.emptyIfNull(fiats.join())
+                        ))
                 );
     }
 
@@ -263,8 +244,8 @@ public class ApiEngine {
     }
 
     @Async
-    public CompletableFuture<Void> createRfq(String baseAsset, String quoteAsset, Side side, int ttl, double qty) {
-        logger.info("Creating RFQ: baseAsset={}, quoteAsset={}, side={}, ttl={}, qty={}", baseAsset, quoteAsset, side, ttl, qty);
+    public CompletableFuture<Void> createRfq(String baseAsset, String quoteAsset, String settlementMethod, Side side, int ttl, double qty) {
+        logger.info("Creating RFQ: baseAsset={}, quoteAsset={}, side={}, ttl={}, qty={}, settlementMethod={}", baseAsset, quoteAsset, side, ttl, qty, settlementMethod);
         String payload = mapper.createObjectNode()
                 .put("baseAsset", baseAsset)
                 .put("quoteAsset", quoteAsset)
@@ -272,8 +253,11 @@ public class ApiEngine {
                 .put("ttl", ttl)
                 .put("qty", qty)
                 .put("minQty", qty / 2)
-                .put("settlementMethod", SETTLEMENT_METHOD_OFF_CHAIN_IMMEDIATE)
+                .put("settlementMethod", settlementMethod)
                 .put("settlementPeriod", 86400)
+                // in order to allow both margin and spot trading
+                .put("requesterMarginRequired", 0.1)
+                .put("offerorMarginRequired", 0.1)
                 .toString();
         return sendRequest(
                 "POST",
@@ -316,6 +300,7 @@ public class ApiEngine {
         logger.info("Creating offer: rfqId={}, ttl={}, bidPx={}, bidQty={}, askPx={}, askQty={}", rfqId, ttl, bidPx, bidQty, askPx, askQty);
         ObjectNode reqNode = mapper.createObjectNode()
                 .put("ttl", ttl)
+                .put("marginRequired", 0.1) // in order to allow both margin and spot trading
                 .put("minQty", Math.min(Optional.ofNullable(bidQty).orElse(Double.MAX_VALUE), Optional.ofNullable(askQty).orElse(Double.MAX_VALUE)) / 2);
         Optional.ofNullable(bidPx).ifPresent(d -> reqNode.put("bidPx", d));
         Optional.ofNullable(bidQty).ifPresent(d -> reqNode.put("bidQty", d));
